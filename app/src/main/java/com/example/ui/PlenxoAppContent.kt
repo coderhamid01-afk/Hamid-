@@ -144,6 +144,11 @@ fun PlenxoAppContent(viewModel: PlenxoViewModel, permissionManager: PermissionMa
             factory = androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.getInstance(application)
         )
     
+    val authViewModel: com.example.viewmodel.AuthViewModel =
+        androidx.lifecycle.viewmodel.compose.viewModel(
+            factory = androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.getInstance(application)
+        )
+    
     val isLoading by viewModel.isLoading.collectAsState()
 
     val errorMessage by viewModel.errorMessage.collectAsState()
@@ -204,19 +209,78 @@ fun PlenxoAppContent(viewModel: PlenxoViewModel, permissionManager: PermissionMa
         ) { screen ->
             when (screen) {
             PlenxoScreen.PLACEHOLDER_ENTRY,
-            PlenxoScreen.SIGN_UP,
-            PlenxoScreen.LOGIN,
-            PlenxoScreen.WELCOME,
-            PlenxoScreen.PROFILE_SETUP,
-            PlenxoScreen.OTP_VERIFICATION,
-            PlenxoScreen.EMAIL_VERIFICATION_WAIT,
-            PlenxoScreen.PLENXO_ID_REVEAL -> {
+            PlenxoScreen.EMAIL_VERIFICATION_WAIT -> {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
                     CircularProgressIndicator(color = primaryColor)
                 }
+            }
+            PlenxoScreen.LOGIN -> {
+                com.example.ui.screens.auth.LoginScreen(
+                    authViewModel = authViewModel,
+                    onNavigateToSignUp = {
+                        authViewModel.resetAuthState()
+                        viewModel.navigateToScreen(PlenxoScreen.SIGN_UP)
+                    },
+                    onLoginSuccess = { userProfile ->
+                        if (userProfile.displayName?.isNotBlank() == true) {
+                            viewModel.checkAndRestoreSession()
+                        } else {
+                            viewModel.navigateToScreen(PlenxoScreen.WELCOME)
+                        }
+                    },
+                    primaryColor = primaryColor
+                )
+            }
+            PlenxoScreen.SIGN_UP -> {
+                com.example.ui.screens.auth.SignUpScreen(
+                    authViewModel = authViewModel,
+                    onNavigateToLogin = {
+                        authViewModel.resetAuthState()
+                        viewModel.navigateToScreen(PlenxoScreen.LOGIN)
+                    },
+                    onSuccess = {
+                        viewModel.navigateToScreen(PlenxoScreen.OTP_VERIFICATION)
+                    },
+                    primaryColor = primaryColor
+                )
+            }
+            PlenxoScreen.OTP_VERIFICATION -> {
+                com.example.ui.OtpVerificationScreen(
+                    authViewModel = authViewModel,
+                    onSuccess = {
+                        viewModel.navigateToScreen(PlenxoScreen.WELCOME)
+                    },
+                    primaryColor = primaryColor
+                )
+            }
+            PlenxoScreen.WELCOME -> {
+                com.example.ui.screens.auth.WelcomeScreen(
+                    onNext = {
+                        viewModel.navigateToScreen(PlenxoScreen.PROFILE_SETUP)
+                    },
+                    primaryColor = primaryColor
+                )
+            }
+            PlenxoScreen.PROFILE_SETUP -> {
+                com.example.ui.profile.SetupProfileScreen(
+                    authViewModel = authViewModel,
+                    onNext = {
+                        viewModel.navigateToScreen(PlenxoScreen.PLENXO_ID_REVEAL)
+                    },
+                    primaryColor = primaryColor
+                )
+            }
+            PlenxoScreen.PLENXO_ID_REVEAL -> {
+                com.example.ui.profile.PlenxoIdRevealScreen(
+                    authViewModel = authViewModel,
+                    onDone = { userProfile ->
+                        viewModel.checkAndRestoreSession()
+                    },
+                    primaryColor = primaryColor
+                )
             }
             PlenxoScreen.PERMISSION_GATEWAY -> {
                 LaunchedEffect(Unit) {

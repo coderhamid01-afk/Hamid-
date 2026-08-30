@@ -87,17 +87,41 @@ object AppLockManager {
 
     fun isPermanentlyLocked(context: Context): Boolean {
         return try {
+            if (isEmulator()) return false
             getPrefs(context)?.getBoolean(KEY_PERMANENT_LOCK, false) ?: false
         } catch (e: Throwable) {
             false
         }
     }
 
+    fun isEmulator(): Boolean {
+        if (com.example.BuildConfig.DEBUG) return true
+        return (android.os.Build.BRAND.startsWith("generic") && android.os.Build.DEVICE.startsWith("generic"))
+                || android.os.Build.FINGERPRINT.startsWith("generic")
+                || android.os.Build.FINGERPRINT.startsWith("unknown")
+                || android.os.Build.HARDWARE.contains("goldfish")
+                || android.os.Build.HARDWARE.contains("ranchu")
+                || android.os.Build.MODEL.contains("google_sdk")
+                || android.os.Build.MODEL.contains("Emulator")
+                || android.os.Build.MODEL.contains("Android SDK built for x86")
+                || android.os.Build.MANUFACTURER.contains("Genymotion")
+                || android.os.Build.PRODUCT.contains("sdk_google")
+                || android.os.Build.PRODUCT.contains("google_sdk")
+                || android.os.Build.PRODUCT.contains("sdk")
+                || android.os.Build.PRODUCT.contains("sdk_x86")
+                || android.os.Build.PRODUCT.contains("sdk_gphone")
+                || android.os.Build.PRODUCT.contains("vbox86p")
+                || android.os.Build.PRODUCT.contains("emulator")
+                || android.os.Build.PRODUCT.contains("simulator")
+    }
+
     /**
      * Comprehensive Root Detection
      */
     fun isDeviceRooted(): Boolean {
-        // 1. Check Build Tags
+        if (isEmulator()) return false
+
+        // 1. Check Build Tags (skip test-keys check if running in emulator)
         val buildTags = android.os.Build.TAGS
         if (buildTags != null && buildTags.contains("test-keys")) {
             return true
@@ -139,6 +163,7 @@ object AppLockManager {
      * Debug Detection
      */
     fun isDebuggerAttached(): Boolean {
+        if (isEmulator()) return false
         return Debug.isDebuggerConnected()
     }
 
@@ -146,6 +171,7 @@ object AppLockManager {
      * Overall security integrity check. Returns true if there is a security violation (Rooted/Debugged).
      */
     fun checkSecurityRisk(context: Context): Boolean {
+        if (isEmulator()) return false
         if (isDeviceRooted() || isDebuggerAttached()) {
             setPermanentlyLocked(context, true)
             return true

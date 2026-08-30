@@ -104,26 +104,13 @@ class MainActivity : BaseActivity() {
         val permissionManager = PermissionManager(this)
         
         try {
-            setContentView(R.layout.activity_main)
-            
-            // Programmatically hide FAB on startup (shown on Home screen)
-            findViewById<FloatingActionButton>(R.id.fab_add_user)?.visibility = View.GONE
-            
-            val container = findViewById<FrameLayout>(R.id.container)
-            val composeView = ComposeView(this).apply {
-                setViewTreeLifecycleOwner(this@MainActivity)
-                setViewTreeViewModelStoreOwner(this@MainActivity)
-                setViewTreeSavedStateRegistryOwner(this@MainActivity)
-                setViewTreeOnBackPressedDispatcherOwner(this@MainActivity)
-                setContent {
-                    androidx.compose.runtime.CompositionLocalProvider(
-                        androidx.activity.compose.LocalActivityResultRegistryOwner provides this@MainActivity
-                    ) {
+            setContent {
+                androidx.compose.runtime.CompositionLocalProvider(
+                    androidx.activity.compose.LocalActivityResultRegistryOwner provides this@MainActivity
+                ) {
                     val viewModel: PlenxoViewModel = viewModel()
                     mainViewModel = viewModel
                     val themeMode by viewModel.appThemeMode.collectAsState()
-                    val currentScreen by viewModel.currentScreen.collectAsState()
-                    val selectedThemeName by viewModel.selectedTheme.collectAsState()
                     val activeIntent by currentIntentState
                     
                     // Access LocalConfiguration to ensure the entire Compose tree dynamically reacts to Locale configuration changes instantly
@@ -145,62 +132,42 @@ class MainActivity : BaseActivity() {
                     }
 
                     LaunchedEffect(activeIntent) {
-                        viewModel.handleDeepLink(activeIntent?.data)
+                        val currIntent = activeIntent ?: return@LaunchedEffect
+                        try {
+                            viewModel.handleDeepLink(currIntent.data)
 
-                        if (activeIntent?.hasExtra("type") == true && activeIntent?.getStringExtra("type") == "friend_request") {
-                            viewModel.navigateToScreen(PlenxoScreen.CHAT_REQUESTS)
-                            activeIntent?.removeExtra("type")
-                        } else if (activeIntent?.hasExtra("chatId") == true) {
-                            val chatId = activeIntent?.getStringExtra("chatId")
-                            val senderId = activeIntent?.getStringExtra("senderId")
-                            if (chatId != null) {
-                                if (senderId != null) {
-                                    viewModel.openChatRoom(ChatRoom(chatId = chatId, participantUids = listOf(viewModel.currentUserId, senderId)))
-                                } else {
-                                    viewModel.currentChatId.value = chatId
-                                    viewModel.navigateToScreen(PlenxoScreen.CHAT_DETAIL)
+                            if (currIntent.hasExtra("type") && currIntent.getStringExtra("type") == "friend_request") {
+                                viewModel.navigateToScreen(PlenxoScreen.CHAT_REQUESTS)
+                                currIntent.removeExtra("type")
+                            } else if (currIntent.hasExtra("chatId")) {
+                                val chatId = currIntent.getStringExtra("chatId")
+                                val senderId = currIntent.getStringExtra("senderId")
+                                if (chatId != null) {
+                                    if (senderId != null) {
+                                        viewModel.openChatRoom(ChatRoom(chatId = chatId, participantUids = listOf(viewModel.currentUserId, senderId)))
+                                    } else {
+                                        viewModel.currentChatId.value = chatId
+                                        viewModel.navigateToScreen(PlenxoScreen.CHAT_DETAIL)
+                                    }
                                 }
+                                currIntent.removeExtra("chatId")
                             }
-                            activeIntent?.removeExtra("chatId")
-                        }
 
-                        val navigateTo = activeIntent?.getStringExtra("NAVIGATE_TO")
-                        if (navigateTo != null) {
-                            try {
-                                val screen = PlenxoScreen.valueOf(navigateTo)
-                                viewModel.navigateToScreen(screen)
-                            } catch (e: Exception) {
-                                if (navigateTo == "WALLPAPER_GALLERY") {
-                                    viewModel.navigateToScreen(PlenxoScreen.WALLPAPER_GALLERY)
+                            val navigateTo = currIntent.getStringExtra("NAVIGATE_TO")
+                            if (navigateTo != null) {
+                                try {
+                                    val screen = PlenxoScreen.valueOf(navigateTo)
+                                    viewModel.navigateToScreen(screen)
+                                } catch (e: Exception) {
+                                    if (navigateTo == "WALLPAPER_GALLERY") {
+                                        viewModel.navigateToScreen(PlenxoScreen.WALLPAPER_GALLERY)
+                                    }
                                 }
+                                currIntent.removeExtra("NAVIGATE_TO")
                             }
-                            activeIntent?.removeExtra("NAVIGATE_TO")
+                        } catch (e: Exception) {
+                            Log.e("MainActivity", "Error handling intent extras: ${e.message}")
                         }
-                    }
-
-                    // Sync FAB visibility with current screen
-                    LaunchedEffect(currentScreen) {
-                        val fab = findViewById<FloatingActionButton>(R.id.fab_add_user)
-                        fab?.visibility = if (currentScreen == PlenxoScreen.HOME) {
-                            View.VISIBLE
-                        } else {
-                            View.GONE
-                        }
-                    }
-                    
-                    // Sync FAB tint with active theme
-                    LaunchedEffect(selectedThemeName) {
-                        val themeColor = when (selectedThemeName) {
-                            "Red" -> Color.parseColor("#E53935")
-                            "Blue" -> Color.parseColor("#1E88E5")
-                            "Purple" -> Color.parseColor("#8E24AA")
-                            "Black" -> Color.parseColor("#212121")
-                            "Golden" -> Color.parseColor("#FFB300")
-                            else -> Color.parseColor("#8A2BE2") // Electric Violet
-                        }
-                        val fab = findViewById<FloatingActionButton>(R.id.fab_add_user)
-                        fab?.backgroundTintList = ColorStateList.valueOf(themeColor)
-                        fab?.setRippleColor(ColorStateList.valueOf(Color.parseColor("#00E5FF")))
                     }
                     
                     PlenxoTheme(themeMode = themeMode) {
@@ -209,19 +176,10 @@ class MainActivity : BaseActivity() {
                             permissionManager = permissionManager
                         )
                     }
-                    }
                 }
             }
-            container?.addView(composeView)
-            
-            val fabAddUser = findViewById<FloatingActionButton>(R.id.fab_add_user)
-            fabAddUser?.setOnClickListener {
-                Log.d("MainActivity", "fab_add_user clicked, navigating to DISCOVERY")
-                mainViewModel?.navigateToScreen(com.example.viewmodel.PlenxoScreen.DISCOVERY)
-            }
-            
         } catch (e: Exception) {
-            Log.e("DEBUG_UI", "Error loading Main XML and UI integration", e)
+            Log.e("DEBUG_UI", "Error initializing MainActivity setContent UI", e)
         }
     }
 }

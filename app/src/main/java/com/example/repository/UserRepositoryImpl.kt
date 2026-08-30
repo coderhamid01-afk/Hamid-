@@ -35,6 +35,11 @@ interface UserRepository {
     suspend fun searchUsersByPlenxoId(plenxoIdQuery: String): List<Map<String, Any>>
 
     /**
+     * Repository function to search user by exact Plenxo ID using whereEqualTo("plenxoId", plenxoId).
+     */
+    suspend fun searchUserByPlenxoId(plenxoId: String): List<Map<String, Any>>
+
+    /**
      * Resolves a Plenxo ID to its linked user email address for authentication purposes.
      */
     suspend fun getEmailByPlenxoId(plenxoId: String): String?
@@ -311,6 +316,26 @@ class UserRepositoryImpl : UserRepository {
             }
         } catch (e: Exception) {
             Log.e("UserRepositoryImpl", "Error searching users strictly by plenxoId: ${e.message}", e)
+            emptyList()
+        }
+    }
+
+    override suspend fun searchUserByPlenxoId(plenxoId: String): List<Map<String, Any>> {
+        val cleanId = plenxoId.trim()
+        if (cleanId.isBlank()) return emptyList()
+        return try {
+            val querySnapshot = firestore.collection("users")
+                .whereEqualTo("plenxoId", cleanId)
+                .get()
+                .await()
+            querySnapshot.documents.mapNotNull { doc ->
+                doc.data?.toMutableMap()?.apply {
+                    put("docId", doc.id)
+                    put("uid", get("uid") as? String ?: doc.id)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("UserRepositoryImpl", "Error searching user by plenxoId $cleanId: ${e.message}")
             emptyList()
         }
     }

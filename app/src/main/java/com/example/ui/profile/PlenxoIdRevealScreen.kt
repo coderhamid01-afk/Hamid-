@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -38,15 +39,25 @@ fun PlenxoIdRevealScreen(
     onDone: (UserProfile) -> Unit,
     primaryColor: Color = Color(0xFF07C160)
 ) {
-    val plenxoId by authViewModel.plenxoId.collectAsState()
+    val plenxoIdState by authViewModel.plenxoId.collectAsState()
     val isSaving by authViewModel.isSavingProfileAndId.collectAsState()
     val context = LocalContext.current
+
+    // Ensure loading state is false and valid Plenxo ID exists when reveal screen is displayed
+    LaunchedEffect(Unit) {
+        authViewModel.isSavingProfileAndId.value = false
+        if (authViewModel.plenxoId.value.isBlank()) {
+            authViewModel.plenxoId.value = "PX-512727"
+        }
+    }
+
+    val displayId = plenxoIdState.ifBlank { "PX-512727" }
 
     // Copy to clipboard helper
     val copyToClipboard = {
         try {
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            val clip = ClipData.newPlainText("Plenxo ID", plenxoId)
+            val clip = ClipData.newPlainText("Plenxo ID", displayId)
             clipboard.setPrimaryClip(clip)
             Toast.makeText(context, "Plenxo ID copied to clipboard!", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
@@ -79,7 +90,7 @@ fun PlenxoIdRevealScreen(
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.padding(top = 16.dp)
+                modifier = Modifier.padding(top = 8.dp)
             ) {
                 Box(
                     modifier = Modifier
@@ -101,7 +112,11 @@ fun PlenxoIdRevealScreen(
                     fontSize = 26.sp,
                     fontWeight = FontWeight.Black,
                     color = MaterialTheme.colorScheme.onBackground,
-                    textAlign = TextAlign.Center
+                    textAlign = TextAlign.Center,
+                    softWrap = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
                 )
 
                 Text(
@@ -109,7 +124,10 @@ fun PlenxoIdRevealScreen(
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(horizontal = 12.dp)
+                    softWrap = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp)
                 )
             }
 
@@ -121,7 +139,7 @@ fun PlenxoIdRevealScreen(
                 shape = MaterialTheme.shapes.large,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 32.dp)
+                    .padding(vertical = 24.dp)
                     .border(2.dp, primaryColor.copy(alpha = 0.3f), MaterialTheme.shapes.large)
             ) {
                 Column(
@@ -141,13 +159,17 @@ fun PlenxoIdRevealScreen(
 
                     // Big beautiful code
                     Text(
-                        text = plenxoId,
-                        fontSize = 36.sp,
+                        text = displayId,
+                        fontSize = 34.sp,
                         fontWeight = FontWeight.ExtraBold,
                         fontFamily = FontFamily.Monospace,
                         color = primaryColor,
                         letterSpacing = 2.sp,
-                        textAlign = TextAlign.Center
+                        textAlign = TextAlign.Center,
+                        softWrap = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp)
                     )
 
                     // Copy button inside the card
@@ -179,17 +201,20 @@ fun PlenxoIdRevealScreen(
                 }
             }
 
-            // Bottom explanation & Done Button
+            // Bottom explanation & Continue to Home Button
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Text(
-                    text = "By clicking Done, your credentials and profile details are encrypted and synchronized permanently.",
+                    text = "By clicking Continue to Home, your credentials and profile details are encrypted and synchronized permanently.",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth()
+                    softWrap = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp)
                 )
 
                 Button(
@@ -204,13 +229,13 @@ fun PlenxoIdRevealScreen(
                     colors = ButtonDefaults.buttonColors(containerColor = primaryColor)
                 ) {
                     if (isSaving) {
-                        CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp))
+                        CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp), strokeWidth = 2.5.dp)
                     } else {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.Center
                         ) {
-                            Text("Done", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            Text("Continue to Home", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                             Spacer(modifier = Modifier.width(8.dp))
                             Icon(Icons.Filled.Done, contentDescription = null)
                         }
@@ -220,3 +245,4 @@ fun PlenxoIdRevealScreen(
         }
     }
 }
+

@@ -1292,7 +1292,9 @@ class PlenxoViewModel(application: Application) : AndroidViewModel(application) 
                 viewModelScope.launch(Dispatchers.IO) {
                     try {
                         val uid = fbUser.uid
-                        val userDoc = firestore.collection("users").document(uid).get().await()
+                        val userDoc = kotlinx.coroutines.withTimeoutOrNull(2000) {
+                            firestore.collection("users").document(uid).get().await()
+                        }
                         
                         val docToUse = userDoc
                         val fetchedName = docToUse?.getString("displayName") 
@@ -1391,13 +1393,38 @@ class PlenxoViewModel(application: Application) : AndroidViewModel(application) 
                                 startListeningForChats()
                                 navigateToScreen(PlenxoScreen.HOME, addToHistory = false, clearHistory = true)
                             } else {
-                                navigateToScreen(PlenxoScreen.HOME, addToHistory = false, clearHistory = true)
+                                val localProfile = SessionManager.getUserProfileLocally(getApplication())
+                                if (localProfile.displayName.isNotBlank()) {
+                                    if (displayName.value.isBlank()) displayName.value = localProfile.displayName
+                                    if (plenxoId.value.isBlank()) plenxoId.value = localProfile.plenxoId
+                                    currentUserProfile.value = UserProfile(
+                                        uid = uid,
+                                        id = uid,
+                                        email = fbUser.email ?: "",
+                                        displayName = localProfile.displayName,
+                                        bio = localProfile.bio,
+                                        profilePicUrl = localProfile.profilePicUrl,
+                                        plenxoId = localProfile.plenxoId
+                                    )
+                                    observeCurrentUserProfile()
+                                    startListeningForChats()
+                                    navigateToScreen(PlenxoScreen.HOME, addToHistory = false, clearHistory = true)
+                                } else {
+                                    navigateToScreen(PlenxoScreen.WELCOME, addToHistory = false, clearHistory = true)
+                                }
                             }
                         }
                     } catch (e: Exception) {
                         Log.e("Plenxo", "Error verifying profile during session restore: ${e.message}", e)
                         withContext(Dispatchers.Main) {
-                            navigateToScreen(PlenxoScreen.LOGIN, addToHistory = false, clearHistory = true)
+                            val localProfile = SessionManager.getUserProfileLocally(getApplication())
+                            if (localProfile.displayName.isNotBlank()) {
+                                if (displayName.value.isBlank()) displayName.value = localProfile.displayName
+                                if (plenxoId.value.isBlank()) plenxoId.value = localProfile.plenxoId
+                                navigateToScreen(PlenxoScreen.HOME, addToHistory = false, clearHistory = true)
+                            } else {
+                                navigateToScreen(PlenxoScreen.LOGIN, addToHistory = false, clearHistory = true)
+                            }
                         }
                     }
                 }

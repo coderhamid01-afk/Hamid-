@@ -86,7 +86,7 @@ fun OtpVerificationScreen(
             )
 
             Text(
-                text = "We have dispatched a 6-digit secure OTP to your registered email address. For local previewing, you can find the code in logcat/toasts, or enter standard master '123456' to bypass.",
+                text = "We have sent an 8-digit secure OTP to your registered email address. Please check your inbox to retrieve your verification code.",
                 fontSize = 14.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -113,12 +113,12 @@ fun OtpVerificationScreen(
             OutlinedTextField(
                 value = otpInput,
                 onValueChange = { newValue ->
-                    if (newValue.length <= 6 && newValue.all { char -> char.isDigit() }) {
+                    if (newValue.length <= 8 && newValue.all { char -> char.isDigit() }) {
                         authViewModel.otpInput.value = newValue
                     }
                 },
-                label = { Text("6-Digit Verification Code") },
-                placeholder = { Text("000000") },
+                label = { Text("8-Digit Verification Code") },
+                placeholder = { Text("00000000") },
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("otp_input"),

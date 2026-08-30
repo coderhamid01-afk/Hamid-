@@ -278,6 +278,7 @@ fun PlenxoAppContent(viewModel: PlenxoViewModel, permissionManager: PermissionMa
                     authViewModel = authViewModel,
                     onDone = { userProfile ->
                         viewModel.checkAndRestoreSession()
+                        viewModel.navigateToScreen(PlenxoScreen.HOME, addToHistory = false, clearHistory = true)
                     },
                     primaryColor = primaryColor
                 )

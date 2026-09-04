@@ -90,16 +90,41 @@ class ProfileSettingsViewModel(application: Application) : AndroidViewModel(appl
                 ?: ""
             fetchUserProfileUseCase(resolvedUid)
                 .map { profile ->
+                    val local = com.example.util.SessionManager.getUserProfileLocally(getApplication())
+                    val fallbackPxId = if (resolvedUid.isNotBlank()) "PX-" + (kotlin.math.abs(resolvedUid.hashCode()) % 900000 + 100000) else ""
+
                     if (profile != null) {
-                        ProfileUiState.Success(profile)
+                        val resolvedName = profile.name.ifBlank {
+                            local.displayName.ifBlank {
+                                auth.currentUser?.displayName ?: if (userEmail.contains("@")) userEmail.substringBefore("@") else "User"
+                            }
+                        }
+                        val resolvedBio = profile.bio.ifBlank { local.bio }
+                        val resolvedPic = profile.profilePicUrl.ifBlank {
+                            local.profilePicUrl.ifBlank { auth.currentUser?.photoUrl?.toString() ?: "" }
+                        }
+                        val resolvedPxId = profile.plenxoId.ifBlank {
+                            local.plenxoId.ifBlank { fallbackPxId }
+                        }
+                        ProfileUiState.Success(
+                            profile.copy(
+                                name = resolvedName,
+                                displayName = resolvedName,
+                                bio = resolvedBio,
+                                statusMessage = resolvedBio,
+                                profilePicUrl = resolvedPic,
+                                profileUrl = resolvedPic,
+                                plenxoId = resolvedPxId,
+                                userCode = resolvedPxId
+                            )
+                        )
                     } else {
-                        val local = com.example.util.SessionManager.getUserProfileLocally(getApplication())
                         val resolvedName = local.displayName.ifBlank {
                             auth.currentUser?.displayName ?: if (userEmail.contains("@")) userEmail.substringBefore("@") else "User"
                         }
                         val resolvedBio = local.bio.ifBlank { "" }
                         val resolvedPic = local.profilePicUrl.ifBlank { auth.currentUser?.photoUrl?.toString() ?: "" }
-                        val resolvedPxId = local.plenxoId.ifBlank { "" }
+                        val resolvedPxId = local.plenxoId.ifBlank { fallbackPxId }
                         ProfileUiState.Success(
                             UserProfileDomainModel(
                                 userId = resolvedUid,

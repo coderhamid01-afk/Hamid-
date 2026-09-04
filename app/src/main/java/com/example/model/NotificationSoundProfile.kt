@@ -3,11 +3,11 @@ package com.example.model
 import com.example.R
 
 enum class NotificationSoundProfile(val displayName: String, val resId: Int, val systemKey: String) {
-    CYBER_ALERT("Cyber Alert", R.raw.cyber_alert, "sound_cyber_alert"),
-    MINIMAL_PING("Minimal Ping", R.raw.minimal_ping, "sound_minimal_ping"),
-    RETRO_SYNTH("Retro Synth", R.raw.retro_synth, "sound_retro_synth"),
-    AMBIENT_BREEZE("Ambient Breeze", R.raw.ambient_breeze, "sound_ambient_breeze"),
-    ECHO_DROP("Echo Drop", R.raw.echo_drop, "sound_echo_drop");
+    CYBER_ALERT("Cyber Alert", 0, "sound_cyber_alert"),
+    MINIMAL_PING("Minimal Ping", 0, "sound_minimal_ping"),
+    RETRO_SYNTH("Retro Synth", 0, "sound_retro_synth"),
+    AMBIENT_BREEZE("Ambient Breeze", 0, "sound_ambient_breeze"),
+    ECHO_DROP("Echo Drop", 0, "sound_echo_drop");
 
     companion object {
         fun fromSystemKey(key: String?): NotificationSoundProfile {

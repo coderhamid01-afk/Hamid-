@@ -158,7 +158,9 @@ fun UserListItemCard(
 
             Spacer(modifier = Modifier.height(2.dp))
 
-            val formattedId = if (plenxoId.isBlank()) "" else if (plenxoId.startsWith("@")) plenxoId else "@$plenxoId"
+            val formattedId = plenxoId.trim().removePrefix("@").removePrefix("#").let {
+                if (it.isBlank()) "" else if (it.startsWith("PX-")) it else "PX-$it"
+            }
             if (formattedId.isNotEmpty()) {
                 Text(
                     text = formattedId,

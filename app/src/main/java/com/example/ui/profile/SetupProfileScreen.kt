@@ -57,26 +57,26 @@ fun SetupProfileScreen(
 
     val context = LocalContext.current
 
-    val presetAvatars = listOf(
-        "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&h=150&q=80",
-        "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=150&h=150&q=80",
-        "https://images.unsplash.com/photo-1599566150163-29194dcaad36?auto=format&fit=crop&w=150&h=150&q=80",
-        "https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=150&h=150&q=80"
-    )
-
     // Gallery Picker launcher
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) {
-            // Set local or simulated URL
             authViewModel.profilePicUrl.value = uri.toString()
         }
     }
 
+    // Reset setup states when screen is first displayed
+    LaunchedEffect(Unit) {
+        authViewModel.isProfileSetupLoading.value = false
+        authViewModel.profileSetupSuccess.value = false
+    }
+
+    // Trigger navigation to Plenxo ID Reveal Screen upon successful save
     LaunchedEffect(success) {
         if (success) {
             onNext()
+            authViewModel.profileSetupSuccess.value = false
         }
     }
 
@@ -112,7 +112,7 @@ fun SetupProfileScreen(
             // Profile Picture Circle Selector
             Box(
                 modifier = Modifier
-                    .size(120.dp)
+                    .size(110.dp)
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.surfaceVariant)
                     .clickable { galleryLauncher.launch("image/*") }
@@ -139,46 +139,16 @@ fun SetupProfileScreen(
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            "Choose Photo",
+                            "Upload Photo",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = primaryColor
                         )
-                    }
-                }
-            }
-
-            // Preset Avatars Quick Selector
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = "Or choose a preset style avatar:",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    presetAvatars.forEach { url ->
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .border(
-                                    width = if (profilePicUrl == url) 2.dp else 1.dp,
-                                    color = if (profilePicUrl == url) primaryColor else Color.LightGray,
-                                    shape = CircleShape
-                                )
-                                .clickable { authViewModel.profilePicUrl.value = url }
-                        ) {
-                            AsyncImage(
-                                model = url,
-                                contentDescription = "Preset Avatar",
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
-                        }
+                        Text(
+                            "(Optional)",
+                            fontSize = 9.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }
@@ -332,20 +302,24 @@ fun SetupProfileScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Done / Next Button
+            // Done Button
             Button(
                 onClick = { authViewModel.completeProfileSetup() },
                 enabled = !isLoading,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(50.dp)
-                    .testTag("setup_profile_next_button"),
+                    .testTag("setup_profile_done_button"),
                 colors = ButtonDefaults.buttonColors(containerColor = primaryColor)
             ) {
                 if (isLoading) {
-                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp))
+                    CircularProgressIndicator(
+                        color = Color.White,
+                        modifier = Modifier.size(24.dp),
+                        strokeWidth = 2.5.dp
+                    )
                 } else {
-                    Text("Next", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text("Done", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }

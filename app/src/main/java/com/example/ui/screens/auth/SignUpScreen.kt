@@ -50,9 +50,16 @@ fun SignUpScreen(
     var isPasswordVisible by remember { mutableStateOf(false) }
     var isConfirmPasswordVisible by remember { mutableStateOf(false) }
 
+    LaunchedEffect(Unit) {
+        authViewModel.signUpError.value = null
+        authViewModel.signUpSuccess.value = false
+        authViewModel.generateSignUpCaptcha()
+    }
+
     LaunchedEffect(success) {
         if (success) {
             onSuccess()
+            authViewModel.signUpSuccess.value = false
         }
     }
 

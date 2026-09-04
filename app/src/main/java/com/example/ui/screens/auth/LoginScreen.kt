@@ -48,6 +48,12 @@ fun LoginScreen(
 
     var isPasswordVisible by remember { mutableStateOf(false) }
 
+    LaunchedEffect(Unit) {
+        authViewModel.loginError.value = null
+        authViewModel.loginSuccess.value = false
+        authViewModel.generateLoginCaptcha()
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(

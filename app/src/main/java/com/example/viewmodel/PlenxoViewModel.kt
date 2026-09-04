@@ -1292,8 +1292,16 @@ class PlenxoViewModel(application: Application) : AndroidViewModel(application) 
                 viewModelScope.launch(Dispatchers.IO) {
                     try {
                         val uid = fbUser.uid
-                        val userDoc = kotlinx.coroutines.withTimeoutOrNull(2000) {
-                            firestore.collection("users").document(uid).get().await()
+                        val userDoc = kotlinx.coroutines.withTimeoutOrNull(8000) {
+                            try {
+                                firestore.collection("users").document(uid).get().await()
+                            } catch (e: Exception) {
+                                null
+                            }
+                        } ?: try {
+                            firestore.collection("users").document(uid).get(com.google.firebase.firestore.Source.CACHE).await()
+                        } catch (e: Exception) {
+                            null
                         }
                         
                         val docToUse = userDoc
@@ -1391,37 +1399,89 @@ class PlenxoViewModel(application: Application) : AndroidViewModel(application) 
 
                                 observeCurrentUserProfile()
                                 startListeningForChats()
-                                navigateToScreen(PlenxoScreen.HOME, addToHistory = false, clearHistory = true)
+
+                                val savedStage = SessionManager.getSavedOnboardingStage(getApplication())
+                                when {
+                                    savedStage == SessionManager.STAGE_COMPLETED && isSetupCompleted -> {
+                                        navigateToScreen(PlenxoScreen.HOME, addToHistory = false, clearHistory = true)
+                                    }
+                                    savedStage == SessionManager.STAGE_REVEAL_PENDING -> {
+                                        navigateToScreen(PlenxoScreen.PLENXO_ID_REVEAL, addToHistory = false, clearHistory = true)
+                                    }
+                                    savedStage == SessionManager.STAGE_PROFILE_SETUP_PENDING -> {
+                                        navigateToScreen(PlenxoScreen.PROFILE_SETUP, addToHistory = false, clearHistory = true)
+                                    }
+                                    savedStage == SessionManager.STAGE_WELCOME_PENDING -> {
+                                        navigateToScreen(PlenxoScreen.WELCOME, addToHistory = false, clearHistory = true)
+                                    }
+                                    savedStage == SessionManager.STAGE_OTP_PENDING -> {
+                                        navigateToScreen(PlenxoScreen.OTP_VERIFICATION, addToHistory = false, clearHistory = true)
+                                    }
+                                    isSetupCompleted -> {
+                                        SessionManager.saveOnboardingStage(getApplication(), SessionManager.STAGE_COMPLETED)
+                                        navigateToScreen(PlenxoScreen.HOME, addToHistory = false, clearHistory = true)
+                                    }
+                                    else -> {
+                                        SessionManager.saveOnboardingStage(getApplication(), SessionManager.STAGE_PROFILE_SETUP_PENDING)
+                                        navigateToScreen(PlenxoScreen.PROFILE_SETUP, addToHistory = false, clearHistory = true)
+                                    }
+                                }
                             } else {
                                 val localProfile = SessionManager.getUserProfileLocally(getApplication())
-                                if (localProfile.displayName.isNotBlank()) {
-                                    if (displayName.value.isBlank()) displayName.value = localProfile.displayName
-                                    if (plenxoId.value.isBlank()) plenxoId.value = localProfile.plenxoId
-                                    currentUserProfile.value = UserProfile(
-                                        uid = uid,
-                                        id = uid,
-                                        email = fbUser.email ?: "",
-                                        displayName = localProfile.displayName,
-                                        bio = localProfile.bio,
-                                        profilePicUrl = localProfile.profilePicUrl,
-                                        plenxoId = localProfile.plenxoId
-                                    )
-                                    observeCurrentUserProfile()
-                                    startListeningForChats()
-                                    navigateToScreen(PlenxoScreen.HOME, addToHistory = false, clearHistory = true)
-                                } else {
-                                    navigateToScreen(PlenxoScreen.WELCOME, addToHistory = false, clearHistory = true)
+                                val savedStage = SessionManager.getSavedOnboardingStage(getApplication())
+                                when {
+                                    savedStage == SessionManager.STAGE_COMPLETED && localProfile.displayName.isNotBlank() -> {
+                                        if (displayName.value.isBlank()) displayName.value = localProfile.displayName
+                                        if (plenxoId.value.isBlank()) plenxoId.value = localProfile.plenxoId
+                                        currentUserProfile.value = UserProfile(
+                                            uid = uid,
+                                            id = uid,
+                                            email = fbUser.email ?: "",
+                                            displayName = localProfile.displayName,
+                                            bio = localProfile.bio,
+                                            profilePicUrl = localProfile.profilePicUrl,
+                                            plenxoId = localProfile.plenxoId
+                                        )
+                                        observeCurrentUserProfile()
+                                        startListeningForChats()
+                                        navigateToScreen(PlenxoScreen.HOME, addToHistory = false, clearHistory = true)
+                                    }
+                                    savedStage == SessionManager.STAGE_REVEAL_PENDING -> {
+                                        navigateToScreen(PlenxoScreen.PLENXO_ID_REVEAL, addToHistory = false, clearHistory = true)
+                                    }
+                                    savedStage == SessionManager.STAGE_PROFILE_SETUP_PENDING -> {
+                                        navigateToScreen(PlenxoScreen.PROFILE_SETUP, addToHistory = false, clearHistory = true)
+                                    }
+                                    savedStage == SessionManager.STAGE_WELCOME_PENDING -> {
+                                        navigateToScreen(PlenxoScreen.WELCOME, addToHistory = false, clearHistory = true)
+                                    }
+                                    savedStage == SessionManager.STAGE_OTP_PENDING -> {
+                                        navigateToScreen(PlenxoScreen.OTP_VERIFICATION, addToHistory = false, clearHistory = true)
+                                    }
+                                    else -> {
+                                        SessionManager.saveOnboardingStage(getApplication(), SessionManager.STAGE_WELCOME_PENDING)
+                                        navigateToScreen(PlenxoScreen.WELCOME, addToHistory = false, clearHistory = true)
+                                    }
                                 }
                             }
                         }
                     } catch (e: Exception) {
                         Log.e("Plenxo", "Error verifying profile during session restore: ${e.message}", e)
                         withContext(Dispatchers.Main) {
+                            val savedStage = SessionManager.getSavedOnboardingStage(getApplication())
                             val localProfile = SessionManager.getUserProfileLocally(getApplication())
-                            if (localProfile.displayName.isNotBlank()) {
+                            if (savedStage == SessionManager.STAGE_COMPLETED && localProfile.displayName.isNotBlank()) {
                                 if (displayName.value.isBlank()) displayName.value = localProfile.displayName
                                 if (plenxoId.value.isBlank()) plenxoId.value = localProfile.plenxoId
                                 navigateToScreen(PlenxoScreen.HOME, addToHistory = false, clearHistory = true)
+                            } else if (savedStage == SessionManager.STAGE_REVEAL_PENDING) {
+                                navigateToScreen(PlenxoScreen.PLENXO_ID_REVEAL, addToHistory = false, clearHistory = true)
+                            } else if (savedStage == SessionManager.STAGE_PROFILE_SETUP_PENDING) {
+                                navigateToScreen(PlenxoScreen.PROFILE_SETUP, addToHistory = false, clearHistory = true)
+                            } else if (savedStage == SessionManager.STAGE_WELCOME_PENDING) {
+                                navigateToScreen(PlenxoScreen.WELCOME, addToHistory = false, clearHistory = true)
+                            } else if (savedStage == SessionManager.STAGE_OTP_PENDING) {
+                                navigateToScreen(PlenxoScreen.OTP_VERIFICATION, addToHistory = false, clearHistory = true)
                             } else {
                                 navigateToScreen(PlenxoScreen.LOGIN, addToHistory = false, clearHistory = true)
                             }

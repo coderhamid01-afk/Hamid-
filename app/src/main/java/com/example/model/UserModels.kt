@@ -224,13 +224,22 @@ suspend fun getOrCreatePermanentPlenxoId(
         return normalized
     }
 
-    // Authoritative Step 2: Only if Firestore document has NO Plenxo ID, atomically generate and save ONE
+    // Authoritative Step 2: Only if Firestore document has NO Plenxo ID, use local ID or deterministic ID based on UID
     val deterministicCode = (kotlin.math.abs(uid.hashCode()) % 900000 + 100000).toString()
     val fallbackPxId = "PX-$deterministicCode"
 
-    val newPlenxoId = try {
-        generateUniqueNumericPlenxoId(firestore)
-    } catch (e: Exception) {
+    val appCtx = com.example.PlenxoApplication.instance
+    val localPx = com.example.util.SessionManager.getLocalPlenxoId(appCtx).trim()
+    val cleanLocalPx = localPx.removePrefix("@").removePrefix("#")
+    val formattedLocalPx = when {
+        cleanLocalPx.startsWith("PX-", ignoreCase = true) -> "PX-${cleanLocalPx.substring(3)}"
+        cleanLocalPx.matches(Regex("^\\d{6}$")) -> "PX-$cleanLocalPx"
+        else -> ""
+    }
+
+    val newPlenxoId = if (formattedLocalPx.isNotBlank()) {
+        formattedLocalPx
+    } else {
         fallbackPxId
     }
 

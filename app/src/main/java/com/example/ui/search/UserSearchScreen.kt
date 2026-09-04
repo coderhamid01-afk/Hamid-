@@ -39,26 +39,36 @@ import com.example.viewmodel.ChatRequestViewModel
 import com.example.viewmodel.PlenxoViewModel
 import kotlinx.coroutines.launch
 
+import com.example.viewmodel.UserSearchViewModel
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UserSearchScreen(
     onBack: () -> Unit,
     userRepository: UserRepository = remember { UserRepositoryImpl() },
     chatRequestViewModel: ChatRequestViewModel = viewModel(),
+    userSearchViewModel: UserSearchViewModel = viewModel(),
     plenxoViewModel: PlenxoViewModel? = null
 ) {
     val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
 
-    var searchQuery by remember { mutableStateOf("") }
-    var isSearching by remember { mutableStateOf(false) }
-    var searchResults by remember { mutableStateOf<List<Map<String, Any>>>(emptyList()) }
-    var hasSearched by remember { mutableStateOf(false) }
+    val searchQuery by userSearchViewModel.searchQuery.collectAsState()
+    val isSearching by userSearchViewModel.isSearching.collectAsState()
+    val searchResults by userSearchViewModel.searchResults.collectAsState()
+    val hasSearched by userSearchViewModel.hasSearched.collectAsState()
+    val searchError by userSearchViewModel.searchError.collectAsState()
+
     var localPendingUids by remember { mutableStateOf<Set<String>>(emptySet()) }
 
     val sentRequests by chatRequestViewModel.sentRequests.collectAsState()
     val contactStatuses by chatRequestViewModel.contactStatuses.collectAsState()
     val toastMsg by chatRequestViewModel.toastMessage.collectAsState()
+
+    LaunchedEffect(searchError) {
+        searchError?.let {
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+        }
+    }
 
     // Sync localPendingUids with real-time server state
     LaunchedEffect(sentRequests, contactStatuses) {
@@ -116,49 +126,13 @@ fun UserSearchScreen(
         ) {
             // STRICT PLENXO ID SEARCH BAR WITH FIXED PX- PREFIX & DIGITS-ONLY INPUT
             val executeSearch = {
-                val digitsOnly = searchQuery.trim().removePrefix("@").removePrefix("#").filter { it.isDigit() }
-                if (digitsOnly.isNotBlank()) {
-                    val searchedId = "PX-$digitsOnly"
-                    isSearching = true
-                    hasSearched = true
-                    coroutineScope.launch {
-                        val currentAuthUid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
-
-                        // Check if searching self
-                        val currentUserData = userRepository.getUserData(currentAuthUid)
-                        val myPlenxoId = ((currentUserData?.get("plenxoId") as? String) ?: "").removePrefix("@").removePrefix("#")
-
-                        if (searchedId.isNotBlank() && (searchedId.equals(myPlenxoId, ignoreCase = true) || digitsOnly == myPlenxoId.removePrefix("PX-"))) {
-                            Toast.makeText(context, "You cannot add yourself", Toast.LENGTH_SHORT).show()
-                            searchResults = emptyList()
-                            isSearching = false
-                            return@launch
-                        }
-
-                        var results = userRepository.searchUsersByPlenxoId(searchedId)
-                        if (results.isEmpty()) {
-                            results = userRepository.searchUsersByPlenxoId(digitsOnly)
-                        }
-
-                        val filteredResults = results
-                            .distinctBy { (it["uid"] as? String) ?: (it["id"] as? String) ?: (it["docId"] as? String) ?: it.hashCode().toString() }
-                            .filter { doc ->
-                                val targetUid = (doc["uid"] as? String) ?: (doc["id"] as? String) ?: (doc["docId"] as? String) ?: ""
-                                targetUid.isNotBlank() && targetUid != currentAuthUid
-                            }
-                        searchResults = filteredResults
-                        isSearching = false
-                    }
-                } else {
-                    Toast.makeText(context, "Please enter numeric User ID", Toast.LENGTH_SHORT).show()
-                }
+                userSearchViewModel.executeSearch()
             }
 
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { input ->
-                    // DIGITS-ONLY CONSTRAINT: Filter strictly for numbers (0-9) up to 6 digits
-                    searchQuery = input.filter { it.isDigit() }.take(6)
+                    userSearchViewModel.updateSearchQuery(input)
                 },
                 prefix = {
                     Text(
@@ -185,9 +159,7 @@ fun UserSearchScreen(
                         if (searchQuery.isNotEmpty()) {
                             IconButton(
                                 onClick = {
-                                    searchQuery = ""
-                                    searchResults = emptyList()
-                                    hasSearched = false
+                                    userSearchViewModel.clearSearch()
                                 },
                                 modifier = Modifier.testTag("clear_search_input_button")
                             ) {

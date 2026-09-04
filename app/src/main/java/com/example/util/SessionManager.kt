@@ -37,6 +37,14 @@ object SessionManager {
     private const val KEY_BIO = "key_bio"
     private const val KEY_PROFILE_PIC_URL = "key_profile_pic_url"
     private const val KEY_USER_AGE = "key_user_age"
+    private const val KEY_ONBOARDING_STAGE = "key_onboarding_stage"
+
+    const val STAGE_OTP_PENDING = "STAGE_OTP_PENDING"
+    const val STAGE_WELCOME_PENDING = "STAGE_WELCOME_PENDING"
+    const val STAGE_PROFILE_SETUP_PENDING = "STAGE_PROFILE_SETUP_PENDING"
+    const val STAGE_REVEAL_PENDING = "STAGE_REVEAL_PENDING"
+    const val STAGE_COMPLETED = "STAGE_COMPLETED"
+    const val STAGE_NONE = "STAGE_NONE"
 
     private fun getEncryptedPrefs(context: Context): SharedPreferences? {
         return try {
@@ -223,6 +231,7 @@ object SessionManager {
                 clear()
                 apply()
             }
+            saveOnboardingStage(context, STAGE_NONE)
             Log.d("SessionManager", "Cleared login state successfully")
         } catch (e: Exception) {
             Log.e("SessionManager", "Error clearing login state", e)
@@ -301,6 +310,24 @@ object SessionManager {
     }
     fun isOnboardingCompleted(context: Context): Boolean {
         return getEncryptedPrefs(context)?.getBoolean("key_onboarding_completed", false) ?: false
+    }
+
+    fun saveOnboardingStage(context: Context, stage: String) {
+        try {
+            getEncryptedPrefs(context)?.edit()?.putString(KEY_ONBOARDING_STAGE, stage)?.apply()
+            Log.d("SessionManager", "Saved onboarding stage: $stage")
+        } catch (e: Exception) {
+            Log.e("SessionManager", "Error saving onboarding stage", e)
+        }
+    }
+
+    fun getSavedOnboardingStage(context: Context): String {
+        return try {
+            getEncryptedPrefs(context)?.getString(KEY_ONBOARDING_STAGE, STAGE_NONE) ?: STAGE_NONE
+        } catch (e: Exception) {
+            Log.e("SessionManager", "Error reading onboarding stage", e)
+            STAGE_NONE
+        }
     }
 
     fun saveChatLock(context: Context, chatId: String, type: String, credential: String) {

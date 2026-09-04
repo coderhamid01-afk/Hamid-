@@ -102,6 +102,8 @@ class MainActivity : BaseActivity() {
         // Enable modern Edge-to-Edge window insets
         enableEdgeToEdge()
         val permissionManager = PermissionManager(this)
+        val stage = SessionManager.getSavedOnboardingStage(applicationContext)
+        Log.d("MainActivity", "App launch onboarding stage: $stage")
         
         try {
             setContent {

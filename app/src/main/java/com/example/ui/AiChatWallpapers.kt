@@ -7,6 +7,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -715,26 +716,26 @@ fun WallpaperRenderer(wallpaperId: String) {
         "MOTION_SAD" -> SadMotionWallpaper()
         "MOTION_ROMANTIC" -> RomanticMotionWallpaper()
 
-        "BG_OBSIDIAN_STRIKE" -> WallpaperImage(com.example.R.drawable.bg_phantom_veil)
-        "BG_BOKEH_REST" -> WallpaperImage(com.example.R.drawable.bg_bokeh_rest)
-        "BG_ZEN_GLOW" -> WallpaperImage(com.example.R.drawable.bg_zen_glow)
-        "BG_ETHEREAL_LUNAR" -> WallpaperImage(com.example.R.drawable.bg_ethereal_lunar)
-        "BG_ROYAL_VELVET" -> WallpaperImage(com.example.R.drawable.bg_royal_velvet)
-        "BG_HACKERS_MATRIX" -> WallpaperImage(com.example.R.drawable.bg_hackers_matrix)
-        "BG_DEEP_OCEAN" -> WallpaperImage(com.example.R.drawable.bg_deep_ocean)
-        "BG_ABSTRACT_GLASS" -> WallpaperImage(com.example.R.drawable.bg_liquid_metallic)
-        "BG_LUNAR_SURFACE" -> WallpaperImage(com.example.R.drawable.bg_ethereal_lunar)
-        "BG_GOLDEN_AURA" -> WallpaperImage(com.example.R.drawable.bg_golden_aura)
-        "BG_KISWA_REVERENCE" -> WallpaperImage(com.example.R.drawable.bg_kiswa_reverence)
-        "BG_GEOMETRIC_MATTE" -> WallpaperImage(com.example.R.drawable.bg_calligraphy_matte)
-        "BG_SILHOUETTE_TWILIGHT" -> WallpaperImage(com.example.R.drawable.bg_silhouette_twilight)
-        "BG_CALLIGRAPHY_MATTE" -> WallpaperImage(com.example.R.drawable.bg_calligraphy_matte)
-        "BG_TASBIH_REFLECTION" -> WallpaperImage(com.example.R.drawable.bg_tasbih_reflection)
-        "BG_TANTRIC_ECLIPSE" -> WallpaperImage(com.example.R.drawable.bg_tantric_eclipse)
-        "BG_SOVEREIGN_CROWN" -> WallpaperImage(com.example.R.drawable.bg_sovereign_crown)
-        "BG_CIPHER_CORE" -> WallpaperImage(com.example.R.drawable.bg_hackers_matrix)
-        "BG_PHANTOM_VEIL" -> WallpaperImage(com.example.R.drawable.bg_phantom_veil)
-        "BG_LIQUID_METALLIC" -> WallpaperImage(com.example.R.drawable.bg_liquid_metallic)
+        "BG_OBSIDIAN_STRIKE" -> WallpaperColor(Color(0xFF0D0F12))
+        "BG_BOKEH_REST" -> WallpaperColor(Color(0xFF1E1E2C))
+        "BG_ZEN_GLOW" -> WallpaperColor(Color(0xFF142820))
+        "BG_ETHEREAL_LUNAR" -> WallpaperColor(Color(0xFF121829))
+        "BG_ROYAL_VELVET" -> WallpaperColor(Color(0xFF2B0938))
+        "BG_HACKERS_MATRIX" -> WallpaperColor(Color(0xFF001A0F))
+        "BG_DEEP_OCEAN" -> WallpaperColor(Color(0xFF0A192F))
+        "BG_ABSTRACT_GLASS" -> WallpaperColor(Color(0xFF1F2937))
+        "BG_LUNAR_SURFACE" -> WallpaperColor(Color(0xFF111827))
+        "BG_GOLDEN_AURA" -> WallpaperColor(Color(0xFF2A2004))
+        "BG_KISWA_REVERENCE" -> WallpaperColor(Color(0xFF1A1A1A))
+        "BG_GEOMETRIC_MATTE" -> WallpaperColor(Color(0xFF222831))
+        "BG_SILHOUETTE_TWILIGHT" -> WallpaperColor(Color(0xFF1B1B2F))
+        "BG_CALLIGRAPHY_MATTE" -> WallpaperColor(Color(0xFF222831))
+        "BG_TASBIH_REFLECTION" -> WallpaperColor(Color(0xFF0F2027))
+        "BG_TANTRIC_ECLIPSE" -> WallpaperColor(Color(0xFF2C1320))
+        "BG_SOVEREIGN_CROWN" -> WallpaperColor(Color(0xFF281E04))
+        "BG_CIPHER_CORE" -> WallpaperColor(Color(0xFF001A0F))
+        "BG_PHANTOM_VEIL" -> WallpaperColor(Color(0xFF0D0F12))
+        "BG_LIQUID_METALLIC" -> WallpaperColor(Color(0xFF1F2937))
         else -> {
             // Default background color or pattern
         }
@@ -742,19 +743,11 @@ fun WallpaperRenderer(wallpaperId: String) {
 }
 
 @Composable
-private fun WallpaperImage(resId: Int) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val painter = coil.compose.rememberAsyncImagePainter(
-        model = coil.request.ImageRequest.Builder(context)
-            .data(resId)
-            .crossfade(true)
-            .build()
-    )
-    androidx.compose.foundation.Image(
-        painter = painter,
-        contentDescription = null,
-        modifier = Modifier.fillMaxSize(),
-        contentScale = androidx.compose.ui.layout.ContentScale.Crop
+private fun WallpaperColor(color: Color) {
+    androidx.compose.foundation.layout.Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(color)
     )
 }
 

@@ -225,11 +225,10 @@ fun PlenxoAppContent(viewModel: PlenxoViewModel, permissionManager: PermissionMa
                         viewModel.navigateToScreen(PlenxoScreen.SIGN_UP)
                     },
                     onLoginSuccess = { userProfile ->
-                        if (userProfile.displayName?.isNotBlank() == true) {
-                            viewModel.checkAndRestoreSession()
-                        } else {
-                            viewModel.navigateToScreen(PlenxoScreen.WELCOME)
-                        }
+                        com.example.util.SessionManager.saveOnboardingStage(context, com.example.util.SessionManager.STAGE_COMPLETED)
+                        com.example.util.SessionManager.saveOnboardingCompleted(context, true)
+                        viewModel.checkAndRestoreSession()
+                        viewModel.navigateToScreen(PlenxoScreen.HOME, addToHistory = false, clearHistory = true)
                     },
                     primaryColor = primaryColor
                 )
@@ -242,6 +241,7 @@ fun PlenxoAppContent(viewModel: PlenxoViewModel, permissionManager: PermissionMa
                         viewModel.navigateToScreen(PlenxoScreen.LOGIN)
                     },
                     onSuccess = {
+                        com.example.util.SessionManager.saveOnboardingStage(context, com.example.util.SessionManager.STAGE_OTP_PENDING)
                         viewModel.navigateToScreen(PlenxoScreen.OTP_VERIFICATION)
                     },
                     primaryColor = primaryColor
@@ -251,6 +251,7 @@ fun PlenxoAppContent(viewModel: PlenxoViewModel, permissionManager: PermissionMa
                 com.example.ui.OtpVerificationScreen(
                     authViewModel = authViewModel,
                     onSuccess = {
+                        com.example.util.SessionManager.saveOnboardingStage(context, com.example.util.SessionManager.STAGE_WELCOME_PENDING)
                         viewModel.navigateToScreen(PlenxoScreen.WELCOME)
                     },
                     primaryColor = primaryColor
@@ -259,6 +260,8 @@ fun PlenxoAppContent(viewModel: PlenxoViewModel, permissionManager: PermissionMa
             PlenxoScreen.WELCOME -> {
                 com.example.ui.screens.auth.WelcomeScreen(
                     onNext = {
+                        authViewModel.onWelcomeNext()
+                        com.example.util.SessionManager.saveOnboardingStage(context, com.example.util.SessionManager.STAGE_PROFILE_SETUP_PENDING)
                         viewModel.navigateToScreen(PlenxoScreen.PROFILE_SETUP)
                     },
                     primaryColor = primaryColor
@@ -268,6 +271,7 @@ fun PlenxoAppContent(viewModel: PlenxoViewModel, permissionManager: PermissionMa
                 com.example.ui.profile.SetupProfileScreen(
                     authViewModel = authViewModel,
                     onNext = {
+                        com.example.util.SessionManager.saveOnboardingStage(context, com.example.util.SessionManager.STAGE_REVEAL_PENDING)
                         viewModel.navigateToScreen(PlenxoScreen.PLENXO_ID_REVEAL)
                     },
                     primaryColor = primaryColor
@@ -277,6 +281,8 @@ fun PlenxoAppContent(viewModel: PlenxoViewModel, permissionManager: PermissionMa
                 com.example.ui.profile.PlenxoIdRevealScreen(
                     authViewModel = authViewModel,
                     onDone = { userProfile ->
+                        authViewModel.onFinishOnboarding()
+                        com.example.util.SessionManager.saveOnboardingStage(context, com.example.util.SessionManager.STAGE_COMPLETED)
                         viewModel.checkAndRestoreSession()
                         viewModel.navigateToScreen(PlenxoScreen.HOME, addToHistory = false, clearHistory = true)
                     },

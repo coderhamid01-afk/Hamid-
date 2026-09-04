@@ -357,13 +357,13 @@ fun ProfileSettingsScreen(
                 }
 
                 LaunchedEffect(profile.name, profile.bio, profile.profileUrl) {
-                    if (profile.name.isNotBlank() && (nameInput.isBlank() || nameInput == "User" || nameInput.contains("@"))) {
+                    if (profile.name.isNotBlank()) {
                         nameInput = profile.name
                     }
-                    if (profile.bio.isNotBlank() && (bioInput.isBlank() || bioInput == "Hey there! I am using Plenxo.")) {
+                    if (profile.bio.isNotBlank()) {
                         bioInput = profile.bio
                     }
-                    if (profile.profileUrl.isNotBlank() && profileUrlInput.isBlank()) {
+                    if (profile.profileUrl.isNotBlank()) {
                         profileUrlInput = profile.profileUrl
                     }
                 }
@@ -475,7 +475,9 @@ fun ProfileSettingsScreen(
 
                             // --- PLENXO ID with Copy Button ---
                             val displayPlenxoId = profile.plenxoId.ifEmpty { profile.userCode }
-                            val formattedPlenxoId = if (displayPlenxoId.startsWith("@")) displayPlenxoId else "@$displayPlenxoId"
+                            val formattedPlenxoId = displayPlenxoId.trim().removePrefix("@").removePrefix("#").let {
+                                if (it.isBlank()) "" else if (it.startsWith("PX-")) it else "PX-$it"
+                            }
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)

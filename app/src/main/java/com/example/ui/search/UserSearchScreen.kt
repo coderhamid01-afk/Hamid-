@@ -134,17 +134,9 @@ fun UserSearchScreen(
                 onValueChange = { input ->
                     userSearchViewModel.updateSearchQuery(input)
                 },
-                prefix = {
-                    Text(
-                        text = "PX-",
-                        color = accentBlue,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp
-                    )
-                },
                 placeholder = {
                     Text(
-                        "Enter 6-digit number (e.g. 849201)",
+                        "Search by Plenxo ID (e.g. PX-849201, 849201)",
                         color = textMuted,
                         fontSize = 14.sp
                     )
@@ -179,7 +171,7 @@ fun UserSearchScreen(
                     }
                 },
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                    keyboardType = KeyboardType.Number,
+                    keyboardType = KeyboardType.Text,
                     imeAction = ImeAction.Search
                 ),
                 keyboardActions = androidx.compose.foundation.text.KeyboardActions(
@@ -203,7 +195,7 @@ fun UserSearchScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "Enter user's numeric Plenxo ID after PX-",
+                text = "Enter user's Plenxo ID (e.g. PX-123456, 123456, or @PX-123456)",
                 color = textMuted,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(start = 8.dp)
@@ -228,7 +220,7 @@ fun UserSearchScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        "No user found with Plenxo ID 'PX-${searchQuery.trim()}'",
+                        "No user found with Plenxo ID '${searchQuery.trim()}'",
                         color = textMuted,
                         fontSize = 14.sp,
                         textAlign = TextAlign.Center
@@ -256,6 +248,7 @@ fun UserSearchScreen(
                         }
                         val profilePic = (userMap["profilePicUrl"] as? String) ?: (userMap["photoUrl"] as? String) ?: ""
                         val profileRingId = (userMap["profileRingId"] as? String) ?: (userMap["selectedRingId"] as? String) ?: "none"
+                        val bio = (userMap["bio"] as? String) ?: (userMap["statusMessage"] as? String) ?: ""
 
                         val contactStatus = contactStatuses[targetUid]
                         val isAccepted = contactStatus == "ACCEPTED"
@@ -276,6 +269,7 @@ fun UserSearchScreen(
                                 plenxoId = formattedPxId,
                                 profilePicUrl = profilePic,
                                 profileRingId = profileRingId,
+                                bio = bio.takeIf { it.isNotBlank() },
                                 actionState = when {
                                     isAccepted -> UserActionState.Chevron
                                     isPending -> UserActionState.Pending

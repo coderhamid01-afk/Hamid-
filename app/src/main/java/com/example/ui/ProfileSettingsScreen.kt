@@ -77,6 +77,7 @@ fun ProfileSettingsScreen(
     val outgoingRequests by weChatViewModel.outgoingPendingRequests.collectAsState()
 
     LaunchedEffect(Unit) {
+        viewModel.refreshProfile()
         weChatViewModel.observeConnectedFriendsAndRequests()
     }
 
@@ -335,9 +336,15 @@ fun ProfileSettingsScreen(
             is ProfileUiState.Success -> {
                 val profile = (profileUiState as ProfileUiState.Success).profile
 
-                var nameInput by remember { mutableStateOf(profile.name) }
-                var bioInput by remember { mutableStateOf(profile.bio) }
-                var profileUrlInput by remember { mutableStateOf(profile.profileUrl) }
+                val initialResolvedName = profile.resolvedDisplayName.takeIf { it.isNotBlank() && it != "User" }
+                    ?: profile.name.takeIf { it.isNotBlank() && it != "User" }
+                    ?: profile.displayName.takeIf { it.isNotBlank() && it != "User" }
+                    ?: ""
+                val initialResolvedBio = profile.resolvedBio.ifBlank { profile.bio.ifBlank { profile.statusMessage } }
+
+                var nameInput by remember { mutableStateOf(initialResolvedName) }
+                var bioInput by remember { mutableStateOf(initialResolvedBio) }
+                var profileUrlInput by remember { mutableStateOf(profile.profilePicUrl.ifBlank { profile.profileUrl }) }
 
                 LaunchedEffect(updateUiState) {
                     if (updateUiState is UpdateUiState.Success) {
@@ -356,15 +363,20 @@ fun ProfileSettingsScreen(
                     }
                 }
 
-                LaunchedEffect(profile.name, profile.bio, profile.profileUrl) {
-                    if (profile.name.isNotBlank()) {
-                        nameInput = profile.name
+                LaunchedEffect(profile.name, profile.displayName, profile.bio, profile.statusMessage, profile.bioStatus, profile.profilePicUrl, profile.profileUrl) {
+                    val newName = profile.resolvedDisplayName.takeIf { it.isNotBlank() && it != "User" }
+                        ?: profile.name.takeIf { it.isNotBlank() && it != "User" }
+                        ?: profile.displayName.takeIf { it.isNotBlank() && it != "User" }
+                    if (!newName.isNullOrBlank() && (nameInput.isBlank() || nameInput == "User")) {
+                        nameInput = newName
                     }
-                    if (profile.bio.isNotBlank()) {
-                        bioInput = profile.bio
+                    val newBio = profile.resolvedBio.ifBlank { profile.bio.ifBlank { profile.statusMessage } }
+                    if (newBio.isNotBlank() && bioInput.isBlank()) {
+                        bioInput = newBio
                     }
-                    if (profile.profileUrl.isNotBlank()) {
-                        profileUrlInput = profile.profileUrl
+                    val newPic = profile.profilePicUrl.ifBlank { profile.profileUrl }
+                    if (newPic.isNotBlank() && profileUrlInput.isBlank()) {
+                        profileUrlInput = newPic
                     }
                 }
 
@@ -465,7 +477,7 @@ fun ProfileSettingsScreen(
 
                             // --- DISPLAY NAME ---
                             Text(
-                                text = profile.name,
+                                text = profile.resolvedDisplayName.ifBlank { profile.name }.ifBlank { "User" },
                                 fontSize = 22.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = textWhite

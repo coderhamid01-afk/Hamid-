@@ -1,14 +1,19 @@
 package com.example.model
 
 import android.util.Log
+import androidx.annotation.Keep
 import androidx.compose.runtime.Immutable
+import com.example.util.getDocumentServerFirst
+import com.example.util.getQuerySnapshotServerFirst
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Source
+import com.google.firebase.firestore.PropertyName
 import kotlinx.coroutines.tasks.await
 import kotlinx.serialization.Serializable
 import kotlin.random.Random
 
+@Keep
 data class UserDocReadResult(
     val snapshot: com.google.firebase.firestore.DocumentSnapshot?,
     val readConfirmed: Boolean
@@ -25,21 +30,20 @@ suspend fun fetchUserDocumentSafely(
 
     for (attempt in 1..maxAttempts) {
         try {
-            val snap = kotlinx.coroutines.withTimeoutOrNull(8000L) {
-                userDocRef.get().await()
-            }
-            if (snap != null && snap.exists()) {
+            val snap = getDocumentServerFirst(userDocRef, timeoutMs = 6000L)
+            if (snap.exists()) {
                 return UserDocReadResult(snap, true)
-            } else if (snap != null && !snap.exists()) {
+            } else {
                 // If direct doc lookup by uid didn't find anything, try query by email or uid field
                 val targetEmail = emailFallback ?: com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.email
                 if (!targetEmail.isNullOrBlank()) {
-                    val querySnap = kotlinx.coroutines.withTimeoutOrNull(6000L) {
-                        firestore.collection("users")
-                            .whereEqualTo("email", targetEmail.trim())
-                            .limit(1)
-                            .get()
-                            .await()
+                    val query = firestore.collection("users")
+                        .whereEqualTo("email", targetEmail.trim())
+                        .limit(1)
+                    val querySnap = try {
+                        getQuerySnapshotServerFirst(query, timeoutMs = 5000L)
+                    } catch (_: Exception) {
+                        null
                     }
                     if (querySnap != null && !querySnap.isEmpty) {
                         return UserDocReadResult(querySnap.documents[0], true)
@@ -50,32 +54,48 @@ suspend fun fetchUserDocumentSafely(
         } catch (e: Exception) {
             Log.w("PlenxoUserFetch", "Attempt $attempt failed reading users/$uid: ${e.message}")
         }
-        try {
-            val cacheSnap = userDocRef.get(com.google.firebase.firestore.Source.CACHE).await()
-            if (cacheSnap.exists()) {
-                return UserDocReadResult(cacheSnap, true)
-            }
-        } catch (_: Exception) { /* cache miss, fall through */ }
         if (attempt < maxAttempts) kotlinx.coroutines.delay(250L * attempt)
     }
-    // Every attempt failed AND no cached copy existed
+    // Every attempt failed
     Log.w("PlenxoUserFetch", "Could not confirm users/$uid after $maxAttempts attempts.")
     return UserDocReadResult(null, false)
 }
 
+@Keep
 @Serializable
 @Immutable
 data class UserModel(
-    val uid: String = "",
-    val displayName: String = "",
-    val email: String = "",
-    val bio: String = "",
-    val profilePicUrl: String = "",
-    val plenxoId: String = "",
-    val profileRingId: String = "none",
-    val profileRing: String? = null,
-    val createdAt: Long = System.currentTimeMillis()
-)
+    @get:PropertyName("uid") @set:PropertyName("uid") var uid: String = "",
+    @get:PropertyName("displayName") @set:PropertyName("displayName") var displayName: String = "",
+    @get:PropertyName("name") @set:PropertyName("name") var name: String = "",
+    @get:PropertyName("email") @set:PropertyName("email") var email: String = "",
+    @get:PropertyName("bio") @set:PropertyName("bio") var bio: String = "",
+    @get:PropertyName("statusMessage") @set:PropertyName("statusMessage") var statusMessage: String = "",
+    @get:PropertyName("bioStatus") @set:PropertyName("bioStatus") var bioStatus: String = "",
+    @get:PropertyName("profilePicUrl") @set:PropertyName("profilePicUrl") var profilePicUrl: String = "",
+    @get:PropertyName("plenxoId") @set:PropertyName("plenxoId") var plenxoId: String = "",
+    @get:PropertyName("profileRingId") @set:PropertyName("profileRingId") var profileRingId: String = "none",
+    @get:PropertyName("profileRing") @set:PropertyName("profileRing") var profileRing: String? = null,
+    @get:PropertyName("createdAt") @set:PropertyName("createdAt") var createdAt: Long = System.currentTimeMillis()
+) {
+    val resolvedDisplayName: String
+        get() = displayName.takeIf { it.isNotBlank() && it != "User" }
+            ?: name.takeIf { it.isNotBlank() && it != "User" }
+            ?: displayName.ifBlank { name }.ifBlank { "User" }
+
+    val resolvedBio: String
+        get() = bio.takeIf { it.isNotBlank() }
+            ?: statusMessage.takeIf { it.isNotBlank() }
+            ?: bioStatus.takeIf { it.isNotBlank() }
+            ?: ""
+
+    @PropertyName("biographyStatus")
+    fun setBiographyStatus(b: String) {
+        if (bio.isBlank()) {
+            bio = b
+        }
+    }
+}
 
 /**
  * Generates a strictly 6-digit numeric Plenxo ID in range 100000..999999
@@ -147,38 +167,19 @@ suspend fun getOrCreatePermanentPlenxoId(
 
     var existingPxId: String? = null
 
-    // Authoritative Step 1: Read Firestore /users/{uid} (Server, fallback Cache)
+    // Authoritative Step 1: Read Firestore /users/{uid} (Server-first with cache fallback)
     for (attempt in 1..3) {
         try {
-            val userSnap = kotlinx.coroutines.withTimeoutOrNull(2500L) {
-                userDocRef.get().await()
-            }
-            if (userSnap != null && userSnap.exists()) {
+            val userSnap = getDocumentServerFirst(userDocRef, timeoutMs = 3000L)
+            if (userSnap.exists()) {
                 existingPxId = userSnap.getString("plenxoId")
-                    ?: userSnap.getString("plenxo_id")
-                    ?: userSnap.getString("px_id")
                     ?: userSnap.getString("userCode")
-                    ?: userSnap.getString("user_code")
                 break
-            } else if (userSnap != null && !userSnap.exists()) {
+            } else {
                 break
             }
         } catch (e: Exception) {
             Log.w("PlenxoIdResolver", "Attempt $attempt reading Plenxo ID for $uid: ${e.message}")
-            try {
-                val userSnapCache = kotlinx.coroutines.withTimeoutOrNull(1500L) {
-                    userDocRef.get(com.google.firebase.firestore.Source.CACHE).await()
-                }
-                if (userSnapCache != null && userSnapCache.exists()) {
-                    existingPxId = userSnapCache.getString("plenxoId")
-                        ?: userSnapCache.getString("plenxo_id")
-                        ?: userSnapCache.getString("px_id")
-                        ?: userSnapCache.getString("userCode")
-                        ?: userSnapCache.getString("user_code")
-                    break
-                }
-            } catch (_: Exception) {}
-
             if (attempt < 3) {
                 kotlinx.coroutines.delay(200)
             }
@@ -196,20 +197,7 @@ suspend fun getOrCreatePermanentPlenxoId(
     }
 
     if (normalized != null) {
-        val numericCode = normalized.removePrefix("PX-")
-        val updateMap = mapOf(
-            "plenxoId" to normalized,
-            "plenxo_id" to normalized,
-            "userCode" to numericCode,
-            "user_code" to numericCode,
-            "px_id" to normalized,
-            "px_code" to numericCode
-        )
-        try {
-            userDocRef.set(updateMap, com.google.firebase.firestore.SetOptions.merge()).await()
-        } catch (e: Exception) {
-            Log.w("PlenxoIdResolver", "Warning: Failed to sync normalized Plenxo ID $normalized: ${e.message}")
-        }
+        // Local persistence sync
         try {
             val appCtx = com.example.PlenxoApplication.instance
             val currentLocal = com.example.util.SessionManager.getUserProfileLocally(appCtx)
@@ -218,9 +206,28 @@ suspend fun getOrCreatePermanentPlenxoId(
                 plenxoId = normalized,
                 displayName = currentLocal.displayName,
                 bio = currentLocal.bio,
-                profilePicUrl = currentLocal.profilePicUrl
+                profilePicUrl = currentLocal.profilePicUrl,
+                dob = currentLocal.dob,
+                gender = currentLocal.gender,
+                age = currentLocal.age
             )
         } catch (_: Exception) {}
+
+        // If cleanId is already properly formatted as PX-XXXXXX, return directly without writing to Firestore
+        if (cleanId != null && cleanId.matches(Regex("^PX-\\d{6}$"))) {
+            return normalized
+        }
+
+        val numericCode = normalized.removePrefix("PX-")
+        val updateMap = mapOf(
+            "plenxoId" to normalized,
+            "userCode" to numericCode
+        )
+        try {
+            userDocRef.set(updateMap, com.google.firebase.firestore.SetOptions.merge()).await()
+        } catch (e: Exception) {
+            Log.w("PlenxoIdResolver", "Warning: Failed to sync normalized Plenxo ID $normalized: ${e.message}")
+        }
         return normalized
     }
 
@@ -246,11 +253,7 @@ suspend fun getOrCreatePermanentPlenxoId(
     val numericCode = newPlenxoId.removePrefix("PX-")
     val newMap = mapOf(
         "plenxoId" to newPlenxoId,
-        "plenxo_id" to newPlenxoId,
-        "userCode" to numericCode,
-        "user_code" to numericCode,
-        "px_id" to newPlenxoId,
-        "px_code" to numericCode
+        "userCode" to numericCode
     )
 
     try {
@@ -280,37 +283,63 @@ suspend fun resolveOrCreatePlenxoId(
     firestore: FirebaseFirestore = FirebaseFirestore.getInstance()
 ): String = getOrCreatePermanentPlenxoId(uid, firestore)
 
+@Keep
 @Serializable
 @Immutable
 data class UserProfile(
-    val uid: String = "",
-    val id: String = "",
-    val email: String = "",
-    val displayName: String = "",
-    val userCode: String = "",
-    val profilePicUrl: String = "",
-    val statusMessage: String = "",
-    val bio: String = "",
-    val selectedRingId: String = "NONE",
-    val profileRingId: String = "none",
-    val profileRing: String? = null,
-    val selectedFontId: String = "DEFAULT",
-    val publicKey: String = "",
-    val phoneNumber: String = "",
-    val plenxoId: String = "",
-    val securityData: SecurityData = SecurityData(),
-    val lastSeenTimestamp: Long = 0L,
-    val lastLoginTimestamp: Long = 0L,
-    val termsAccepted: Boolean = false,
-    val termsAcceptedAt: String = "",
-    val leagueData: LeagueData = LeagueData()
-)
+    @get:PropertyName("uid") @set:PropertyName("uid") var uid: String = "",
+    @get:PropertyName("id") @set:PropertyName("id") var id: String = "",
+    @get:PropertyName("email") @set:PropertyName("email") var email: String = "",
+    @get:PropertyName("displayName") @set:PropertyName("displayName") var displayName: String = "",
+    @get:PropertyName("name") @set:PropertyName("name") var name: String = "",
+    @get:PropertyName("userCode") @set:PropertyName("userCode") var userCode: String = "",
+    @get:PropertyName("profilePicUrl") @set:PropertyName("profilePicUrl") var profilePicUrl: String = "",
+    @get:PropertyName("statusMessage") @set:PropertyName("statusMessage") var statusMessage: String = "",
+    @get:PropertyName("bio") @set:PropertyName("bio") var bio: String = "",
+    @get:PropertyName("bioStatus") @set:PropertyName("bioStatus") var bioStatus: String = "",
+    @get:PropertyName("selectedRingId") @set:PropertyName("selectedRingId") var selectedRingId: String = "NONE",
+    @get:PropertyName("profileRingId") @set:PropertyName("profileRingId") var profileRingId: String = "none",
+    @get:PropertyName("profileRing") @set:PropertyName("profileRing") var profileRing: String? = null,
+    @get:PropertyName("selectedFontId") @set:PropertyName("selectedFontId") var selectedFontId: String = "DEFAULT",
+    @get:PropertyName("publicKey") @set:PropertyName("publicKey") var publicKey: String = "",
+    @get:PropertyName("phoneNumber") @set:PropertyName("phoneNumber") var phoneNumber: String = "",
+    @get:PropertyName("plenxoId") @set:PropertyName("plenxoId") var plenxoId: String = "",
+    @get:PropertyName("securityData") @set:PropertyName("securityData") var securityData: SecurityData = SecurityData(),
+    @get:PropertyName("lastSeenTimestamp") @set:PropertyName("lastSeenTimestamp") var lastSeenTimestamp: Long = 0L,
+    @get:PropertyName("lastLoginTimestamp") @set:PropertyName("lastLoginTimestamp") var lastLoginTimestamp: Long = 0L,
+    @get:PropertyName("termsAccepted") @set:PropertyName("termsAccepted") var termsAccepted: Boolean = false,
+    @get:PropertyName("termsAcceptedAt") @set:PropertyName("termsAcceptedAt") var termsAcceptedAt: String = "",
+    @get:PropertyName("leagueData") @set:PropertyName("leagueData") var leagueData: LeagueData = LeagueData()
+) {
+    val resolvedDisplayName: String
+        get() = displayName.takeIf { it.isNotBlank() && it != "User" }
+            ?: name.takeIf { it.isNotBlank() && it != "User" }
+            ?: displayName.ifBlank { name }.ifBlank { "User" }
+
+    val resolvedBio: String
+        get() = bio.takeIf { it.isNotBlank() }
+            ?: statusMessage.takeIf { it.isNotBlank() }
+            ?: bioStatus.takeIf { it.isNotBlank() }
+            ?: ""
+
+    @PropertyName("biographyStatus")
+    fun setBiographyStatus(b: String) {
+        if (bio.isBlank()) {
+            bio = b
+        }
+        if (statusMessage.isBlank()) {
+            statusMessage = b
+        }
+    }
+}
 
 fun UserProfile.toUserModel(): UserModel = UserModel(
     uid = uid.ifEmpty { id },
-    displayName = displayName,
+    displayName = resolvedDisplayName,
+    name = resolvedDisplayName,
     email = email,
-    bio = bio.ifEmpty { statusMessage },
+    bio = resolvedBio,
+    statusMessage = resolvedBio,
     profilePicUrl = profilePicUrl,
     plenxoId = plenxoId,
     profileRingId = profileRingId.ifEmpty { selectedRingId },
@@ -320,10 +349,11 @@ fun UserProfile.toUserModel(): UserModel = UserModel(
 fun UserModel.toUserProfile(): UserProfile = UserProfile(
     uid = uid,
     id = uid,
-    displayName = displayName,
+    displayName = resolvedDisplayName,
+    name = resolvedDisplayName,
     email = email,
-    bio = bio,
-    statusMessage = bio,
+    bio = resolvedBio,
+    statusMessage = resolvedBio,
     profilePicUrl = profilePicUrl,
     plenxoId = plenxoId,
     profileRingId = profileRingId,
@@ -331,7 +361,7 @@ fun UserModel.toUserProfile(): UserProfile = UserProfile(
     userCode = plenxoId
 )
 
-
+@Keep
 @Serializable
 data class LeagueData(
     val currentCrown: String = "Bronze",
@@ -341,6 +371,7 @@ data class LeagueData(
     val lastClaimedTimestamp: String = ""
 )
 
+@Keep
 @Serializable
 data class SecurityData(
     val failedLoginCount: Int = 0,
@@ -348,6 +379,7 @@ data class SecurityData(
     val totalLifetimeFails: Int = 0
 )
 
+@Keep
 @Serializable
 data class ActiveSession(
     val sessionId: String = "",
@@ -360,6 +392,7 @@ data class ActiveSession(
     val isCurrentDevice: Boolean = false
 )
 
+@Keep
 @Serializable
 @Immutable
 data class ConnectedFriend(
@@ -372,6 +405,7 @@ data class ConnectedFriend(
     val addedAt: Long = System.currentTimeMillis()
 )
 
+@Keep
 @Serializable
 @Immutable
 data class FriendRequest(
@@ -391,6 +425,7 @@ data class FriendRequest(
     val senderProfilePic: String = senderPhotoUrl
 )
 
+@Keep
 @Serializable
 data class MessagePayload(
     val messageId: String = "",
@@ -408,12 +443,13 @@ data class MessagePayload(
     val senderActiveFontId: String = "DEFAULT"
 )
 
+@Keep
 @Serializable
 data class CallSession(
-    val callId: String,
-    val callerId: String,
-    val receiverId: String,
-    val state: String,
-    val callType: String, // AUDIO, VIDEO
-    val timestamp: Long
+    val callId: String = "",
+    val callerId: String = "",
+    val receiverId: String = "",
+    val state: String = "",
+    val callType: String = "AUDIO", // AUDIO, VIDEO
+    val timestamp: Long = 0L
 )

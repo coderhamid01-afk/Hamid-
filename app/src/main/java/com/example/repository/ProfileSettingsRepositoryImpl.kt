@@ -3,12 +3,16 @@ package com.example.repository
 
 import android.util.Log
 import com.example.model.UserProfileDomainModel
+import com.example.util.getDocumentServerFirst
+import com.example.util.getQuerySnapshotServerFirst
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -26,6 +30,69 @@ class ProfileSettingsRepositoryImpl : ProfileSettingsRepository {
         .addLast(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
         .build()
 
+    private fun parseSnapshotToDomainModel(snapshot: DocumentSnapshot, targetId: String): UserProfileDomainModel {
+        val data = snapshot.data ?: emptyMap()
+        val currentEmail = firebaseAuth.currentUser?.email
+        val resolvedDisplayName = (data["displayName"] as? String)?.takeIf { it.isNotBlank() && it != "User" }
+            ?: (data["name"] as? String)?.takeIf { it.isNotBlank() && it != "User" }
+            ?: (data["display_name"] as? String)?.takeIf { it.isNotBlank() && it != "User" }
+            ?: (data["current_name"] as? String)?.takeIf { it.isNotBlank() && it != "User" }
+            ?: (data["fullName"] as? String)?.takeIf { it.isNotBlank() && it != "User" }
+            ?: (data["full_name"] as? String)?.takeIf { it.isNotBlank() && it != "User" }
+            ?: (data["username"] as? String)?.takeIf { it.isNotBlank() && it != "User" }
+            ?: firebaseAuth.currentUser?.displayName?.takeIf { it.isNotBlank() && it != "User" }
+            ?: (data["displayName"] as? String)?.takeIf { it.isNotBlank() }
+            ?: (data["name"] as? String)?.takeIf { it.isNotBlank() }
+            ?: "User"
+
+        val resolvedBio = (data["bio"] as? String)?.takeIf { it.isNotBlank() }
+            ?: (data["statusMessage"] as? String)?.takeIf { it.isNotBlank() }
+            ?: (data["bioStatus"] as? String)?.takeIf { it.isNotBlank() }
+            ?: (data["bio_status"] as? String)?.takeIf { it.isNotBlank() }
+            ?: (data["status_message"] as? String)?.takeIf { it.isNotBlank() }
+            ?: (data["current_bio"] as? String)?.takeIf { it.isNotBlank() }
+            ?: (data["about"] as? String)?.takeIf { it.isNotBlank() }
+            ?: (data["status"] as? String)?.takeIf { it.isNotBlank() }
+            ?: ""
+
+        val resolvedPicUrl = (data["profilePicUrl"] as? String)?.takeIf { it.isNotBlank() }
+            ?: (data["profilePic"] as? String)?.takeIf { it.isNotBlank() }
+            ?: (data["avatarUrl"] as? String)?.takeIf { it.isNotBlank() }
+            ?: (data["avatar_url"] as? String)?.takeIf { it.isNotBlank() }
+            ?: (data["photoUrl"] as? String)?.takeIf { it.isNotBlank() }
+            ?: (data["profileUrl"] as? String)?.takeIf { it.isNotBlank() }
+            ?: (data["current_profile_pic_url"] as? String)?.takeIf { it.isNotBlank() }
+            ?: firebaseAuth.currentUser?.photoUrl?.toString()
+            ?: ""
+
+        val resolvedEmail = (data["email"] as? String)?.takeIf { it.isNotBlank() }
+            ?: currentEmail
+            ?: ""
+
+        val resolvedPlenxoId = (data["plenxoId"] as? String)?.takeIf { it.isNotBlank() }
+            ?: (data["plenxo_id"] as? String)?.takeIf { it.isNotBlank() }
+            ?: (data["px_id"] as? String)?.takeIf { it.isNotBlank() }
+            ?: (data["userCode"] as? String)?.takeIf { it.isNotBlank() }
+            ?: ""
+
+        return UserProfileDomainModel(
+            id = snapshot.id,
+            userId = targetId,
+            displayName = resolvedDisplayName,
+            name = resolvedDisplayName,
+            email = resolvedEmail,
+            statusMessage = resolvedBio,
+            bio = resolvedBio,
+            bioStatus = resolvedBio,
+            profilePicUrl = resolvedPicUrl,
+            profileUrl = resolvedPicUrl,
+            userCode = resolvedPlenxoId,
+            plenxoId = resolvedPlenxoId,
+            selectedRingId = (data["selectedRingId"] as? String) ?: "",
+            profileRingId = (data["profileRingId"] as? String) ?: ""
+        )
+    }
+
     override fun getProfileFlow(userId: String): Flow<UserProfileDomainModel?> = callbackFlow {
         val fbUid = firebaseAuth.currentUser?.uid ?: ""
         val sessionToken = try { com.example.util.SessionManager.getLoginState(com.example.PlenxoApplication.instance).token ?: "" } catch (e: Exception) { "" }
@@ -40,119 +107,79 @@ class ProfileSettingsRepositoryImpl : ProfileSettingsRepository {
         }
 
         val docRef = firestore.collection("users").document(targetId)
+
+        // Resilient server-first fetch with automatic cache fallback
+        launch {
+            try {
+                val serverSnap = getDocumentServerFirst(docRef)
+                if (serverSnap.exists()) {
+                    val profile = parseSnapshotToDomainModel(serverSnap, targetId)
+                    if (profile.displayName.isNotBlank() && profile.displayName != "User") {
+                        try {
+                            com.example.util.SessionManager.saveUserProfileLocally(
+                                com.example.PlenxoApplication.instance,
+                                plenxoId = profile.plenxoId,
+                                displayName = profile.displayName,
+                                bio = profile.bio,
+                                profilePicUrl = profile.profilePicUrl
+                            )
+                        } catch (_: Exception) {}
+                    }
+                    trySend(profile)
+                }
+            } catch (e: Exception) {
+                Log.w("ProfileSettingsRepo", "Initial resilient fetch error for $targetId: ${e.message}")
+            }
+        }
+
         val listener = docRef.addSnapshotListener { snapshot, error ->
             if (error != null || snapshot == null || !snapshot.exists()) {
                 val currentEmail = firebaseAuth.currentUser?.email
                 if (!currentEmail.isNullOrBlank()) {
-                    firestore.collection("users").whereEqualTo("email", currentEmail).limit(1).get()
-                        .addOnSuccessListener { querySnap ->
+                    launch {
+                        try {
+                            val query = firestore.collection("users").whereEqualTo("email", currentEmail).limit(1)
+                            val querySnap = getQuerySnapshotServerFirst(query)
                             if (!querySnap.isEmpty) {
                                 val d = querySnap.documents[0]
-                                val data = d.data ?: emptyMap()
-                                val resolvedDisplayName = (data["displayName"] as? String)
-                                    ?: (data["display_name"] as? String)
-                                    ?: (data["name"] as? String)
-                                    ?: (data["current_name"] as? String)
-                                    ?: (data["fullName"] as? String)
-                                    ?: ""
-                                val resolvedBio = (data["bio"] as? String)
-                                    ?: (data["statusMessage"] as? String)
-                                    ?: (data["current_bio"] as? String)
-                                    ?: (data["status_message"] as? String)
-                                    ?: (data["about"] as? String)
-                                    ?: (data["status"] as? String)
-                                    ?: ""
-                                val resolvedPicUrl = (data["profilePicUrl"] as? String)
-                                    ?: (data["profilePic"] as? String)
-                                    ?: (data["avatarUrl"] as? String)
-                                    ?: (data["avatar_url"] as? String)
-                                    ?: (data["photoUrl"] as? String)
-                                    ?: (data["profileUrl"] as? String)
-                                    ?: (data["current_profile_pic_url"] as? String)
-                                    ?: ""
-                                val resolvedEmail = (data["email"] as? String)?.takeIf { it.isNotBlank() } ?: currentEmail
-                                val resolvedPlenxoId = (data["plenxoId"] as? String)
-                                    ?: (data["plenxo_id"] as? String)
-                                    ?: (data["px_id"] as? String)
-                                    ?: (data["userCode"] as? String)
-                                    ?: (data["user_code"] as? String)
-                                    ?: ""
-                                val profile = UserProfileDomainModel(
-                                    id = d.id,
-                                    userId = targetId,
-                                    displayName = resolvedDisplayName,
-                                    name = resolvedDisplayName,
-                                    email = resolvedEmail,
-                                    statusMessage = resolvedBio,
-                                    bio = resolvedBio,
-                                    profilePicUrl = resolvedPicUrl,
-                                    profileUrl = resolvedPicUrl,
-                                    userCode = resolvedPlenxoId,
-                                    plenxoId = resolvedPlenxoId,
-                                    selectedRingId = (data["selectedRingId"] as? String) ?: "",
-                                    profileRingId = (data["profileRingId"] as? String) ?: ""
-                                )
+                                val profile = parseSnapshotToDomainModel(d, targetId)
+                                if (profile.displayName.isNotBlank() && profile.displayName != "User") {
+                                    try {
+                                        com.example.util.SessionManager.saveUserProfileLocally(
+                                            com.example.PlenxoApplication.instance,
+                                            plenxoId = profile.plenxoId,
+                                            displayName = profile.displayName,
+                                            bio = profile.bio,
+                                            profilePicUrl = profile.profilePicUrl
+                                        )
+                                    } catch (_: Exception) {}
+                                }
                                 trySend(profile)
                             } else {
                                 trySend(null)
                             }
-                        }
-                        .addOnFailureListener {
+                        } catch (e: Exception) {
                             trySend(null)
                         }
+                    }
                 } else {
                     trySend(null)
                 }
                 return@addSnapshotListener
             }
 
-            val data = snapshot.data ?: emptyMap()
-            val resolvedDisplayName = (data["displayName"] as? String)
-                ?: (data["display_name"] as? String)
-                ?: (data["name"] as? String)
-                ?: (data["current_name"] as? String)
-                ?: (data["fullName"] as? String)
-                ?: ""
-            val resolvedBio = (data["bio"] as? String)
-                ?: (data["statusMessage"] as? String)
-                ?: (data["current_bio"] as? String)
-                ?: (data["status_message"] as? String)
-                ?: (data["about"] as? String)
-                ?: (data["status"] as? String)
-                ?: ""
-            val resolvedPicUrl = (data["profilePicUrl"] as? String)
-                ?: (data["profilePic"] as? String)
-                ?: (data["avatarUrl"] as? String)
-                ?: (data["avatar_url"] as? String)
-                ?: (data["photoUrl"] as? String)
-                ?: (data["profileUrl"] as? String)
-                ?: (data["current_profile_pic_url"] as? String)
-                ?: ""
-            val resolvedEmail = (data["email"] as? String)?.takeIf { it.isNotBlank() }
-                ?: firebaseAuth.currentUser?.email
-                ?: ""
-            val resolvedPlenxoId = (data["plenxoId"] as? String)
-                ?: (data["plenxo_id"] as? String)
-                ?: (data["px_id"] as? String)
-                ?: (data["userCode"] as? String)
-                ?: (data["user_code"] as? String)
-                ?: ""
-
-            val profile = UserProfileDomainModel(
-                id = snapshot.id,
-                userId = targetId,
-                displayName = resolvedDisplayName,
-                name = resolvedDisplayName,
-                email = resolvedEmail,
-                statusMessage = resolvedBio,
-                bio = resolvedBio,
-                profilePicUrl = resolvedPicUrl,
-                profileUrl = resolvedPicUrl,
-                userCode = resolvedPlenxoId,
-                plenxoId = resolvedPlenxoId,
-                selectedRingId = (data["selectedRingId"] as? String) ?: "",
-                profileRingId = (data["profileRingId"] as? String) ?: ""
-            )
+            val profile = parseSnapshotToDomainModel(snapshot, targetId)
+            if (profile.displayName.isNotBlank() && profile.displayName != "User") {
+                try {
+                    com.example.util.SessionManager.saveUserProfileLocally(
+                        com.example.PlenxoApplication.instance,
+                        plenxoId = profile.plenxoId,
+                        displayName = profile.displayName,
+                        bio = profile.bio,
+                        profilePicUrl = profile.profilePicUrl
+                    )
+                } catch (_: Exception) {}
+            }
             trySend(profile)
         }
 

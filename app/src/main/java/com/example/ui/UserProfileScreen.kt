@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import com.example.model.ChatRoom
 import com.example.model.User
 import com.example.ui.components.ProfileImageWithRing
+import com.example.util.getDocumentServerFirst
 import com.example.viewmodel.PlenxoViewModel
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.tasks.await
@@ -104,31 +105,46 @@ fun UserProfileScreen(
             }
             try {
                 val db = FirebaseFirestore.getInstance()
-                val doc = db.collection("users").document(userId).get().await()
-                if (doc.exists()) {
-                    val dName = doc.getString("displayName")
-                        ?: doc.getString("fullName")
-                        ?: doc.getString("name")
-                        ?: userProfile?.displayName
+                val doc = try {
+                    getDocumentServerFirst(db.collection("users").document(userId), timeoutMs = 6000L)
+                } catch (e: Exception) {
+                    null
+                }
+                if (doc != null && doc.exists()) {
+                    val dName = doc.getString("displayName")?.takeIf { it.isNotBlank() && it != "User" }
+                        ?: doc.getString("name")?.takeIf { it.isNotBlank() && it != "User" }
+                        ?: doc.getString("display_name")?.takeIf { it.isNotBlank() && it != "User" }
+                        ?: doc.getString("current_name")?.takeIf { it.isNotBlank() && it != "User" }
+                        ?: doc.getString("fullName")?.takeIf { it.isNotBlank() && it != "User" }
+                        ?: doc.getString("full_name")?.takeIf { it.isNotBlank() && it != "User" }
+                        ?: doc.getString("username")?.takeIf { it.isNotBlank() && it != "User" }
+                        ?: userProfile?.displayName?.takeIf { it.isNotBlank() && it != "User" }
+                        ?: com.example.util.SessionManager.getLocalDisplayName(context).takeIf { it.isNotBlank() && it != "User" }
+                        ?: doc.getString("displayName")?.takeIf { it.isNotBlank() }
+                        ?: doc.getString("name")?.takeIf { it.isNotBlank() }
                         ?: "User"
-                    val pPic = doc.getString("profilePicUrl")
-                        ?: doc.getString("avatar_url")
-                        ?: doc.getString("photoUrl")
+                    val pPic = doc.getString("profilePicUrl")?.takeIf { it.isNotBlank() }
+                        ?: doc.getString("avatar_url")?.takeIf { it.isNotBlank() }
+                        ?: doc.getString("photoUrl")?.takeIf { it.isNotBlank() }
                         ?: userProfile?.profilePicUrl
                         ?: ""
-                    val pId = doc.getString("plenxoId")
-                        ?: doc.getString("userCode")
-                        ?: doc.getString("username")
+                    val pId = doc.getString("plenxoId")?.takeIf { it.isNotBlank() }
+                        ?: doc.getString("userCode")?.takeIf { it.isNotBlank() }
                         ?: userProfile?.plenxoId
                         ?: ""
                     val ring = doc.getString("profileRingId")
                         ?: doc.getString("selectedRingId")
                         ?: userProfile?.profileRingId
                         ?: "none"
-                    val bio = doc.getString("bio")
-                        ?: doc.getString("about")
-                        ?: doc.getString("statusMessage")
-                        ?: ""
+                    val bio = doc.getString("bio")?.takeIf { it.isNotBlank() }
+                        ?: doc.getString("statusMessage")?.takeIf { it.isNotBlank() }
+                        ?: doc.getString("bioStatus")?.takeIf { it.isNotBlank() }
+                        ?: doc.getString("bio_status")?.takeIf { it.isNotBlank() }
+                        ?: doc.getString("status_message")?.takeIf { it.isNotBlank() }
+                        ?: doc.getString("current_bio")?.takeIf { it.isNotBlank() }
+                        ?: doc.getString("about")?.takeIf { it.isNotBlank() }
+                        ?: doc.getString("status")?.takeIf { it.isNotBlank() }
+                        ?: com.example.util.SessionManager.getLocalBio(context)
                     val bVis = doc.getString("bioVisibility")
                         ?: doc.getString("bioVis")
                         ?: "PUBLIC"

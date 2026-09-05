@@ -215,7 +215,6 @@ class SecurityRepository(private val context: Context) {
             val uid = targetDoc.id
             val email = targetDoc.getString("email") ?: ""
             val plenxoId = targetDoc.getString("plenxoId")
-                ?: targetDoc.getString("px_id")
                 ?: ("PX-" + (targetDoc.getString("userCode") ?: ""))
             val is2FA = targetDoc.getBoolean("is2FAEnabled")
                 ?: targetDoc.getBoolean("is_2fa_enabled")
@@ -331,7 +330,6 @@ class SecurityRepository(private val context: Context) {
         val uid = doc.id
         val fetchedEmail = doc.getString("email") ?: cleanEmail
         val fetchedPlenxoId = doc.getString("plenxoId")
-            ?: doc.getString("px_id")
             ?: ("PX-" + (doc.getString("userCode") ?: ""))
         val is2FA = doc.getBoolean("is2FAEnabled")
             ?: doc.getBoolean("is_2fa_enabled")

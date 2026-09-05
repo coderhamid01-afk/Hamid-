@@ -65,6 +65,7 @@ fun UserListItemCard(
     plenxoId: String,
     profilePicUrl: String?,
     modifier: Modifier = Modifier,
+    bio: String? = null,
     isOnline: Boolean = false,
     profileRingId: String = "none",
     avatarSize: Dp = 52.dp,
@@ -170,6 +171,17 @@ fun UserListItemCard(
                     overflow = TextOverflow.Ellipsis
                 )
             }
+
+            if (!bio.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = bio,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
 
         Spacer(modifier = Modifier.width(8.dp))
@@ -193,6 +205,7 @@ fun UserListItemCard(
     profilePicUrl: String?,
     actionState: UserActionState,
     modifier: Modifier = Modifier,
+    bio: String? = null,
     isOnline: Boolean = false,
     profileRingId: String = "none",
     avatarSize: Dp = 52.dp,
@@ -203,6 +216,7 @@ fun UserListItemCard(
         plenxoId = plenxoId,
         profilePicUrl = profilePicUrl,
         modifier = modifier,
+        bio = bio,
         isOnline = isOnline,
         profileRingId = profileRingId,
         avatarSize = avatarSize,

@@ -39,6 +39,8 @@ import android.net.Uri
 import android.media.MediaPlayer
 import com.example.util.EmailUtils
 import com.example.util.SessionManager
+import com.example.util.getDocumentServerFirst
+import com.example.util.getQuerySnapshotServerFirst
 import com.example.network.NetworkModule
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.flow.SharingStarted
@@ -208,7 +210,7 @@ class PlenxoViewModel(application: Application) : AndroidViewModel(application) 
     val profilePhotoVisibility = MutableStateFlow("EVERYONE")
     val bioVisibility = MutableStateFlow("EVERYONE")
     val readReceiptsEnabled = MutableStateFlow(true)
-    val aboutText = MutableStateFlow("Hey there! I am using Plenxo Pro.")
+    val aboutText = MutableStateFlow("Hey there! I am using Plenxo.")
     val pinnedChatIds = MutableStateFlow<Set<String>>(emptySet())
     val isLocalOnlyMode = MutableStateFlow(false)
     val darkModeEnabled = MutableStateFlow(true)
@@ -415,15 +417,6 @@ class PlenxoViewModel(application: Application) : AndroidViewModel(application) 
         val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
         if (uid.isEmpty()) return
 
-        // Legacy User Repair (Safety Net using consolidated resolveOrCreatePlenxoId)
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                com.example.model.resolveOrCreatePlenxoId(uid, firestore)
-            } catch (e: Exception) {
-                Log.e("PlenxoProfileSync", "Error resolving Plenxo ID in observeCurrentUserProfile: ${e.message}")
-            }
-        }
-
         currentUserProfileListener = firestore.collection("users").document(uid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null || snapshot == null || !snapshot.exists()) return@addSnapshotListener
@@ -433,11 +426,15 @@ class PlenxoViewModel(application: Application) : AndroidViewModel(application) 
                     ?: (data["name"] as? String)
                     ?: (data["current_name"] as? String)
                     ?: (data["fullName"] as? String)
+                    ?: (data["full_name"] as? String)
+                    ?: (data["username"] as? String)
                     ?: ""
                 val resolvedBio = (data["bio"] as? String)
+                    ?: (data["bioStatus"] as? String)
+                    ?: (data["bio_status"] as? String)
                     ?: (data["statusMessage"] as? String)
-                    ?: (data["current_bio"] as? String)
                     ?: (data["status_message"] as? String)
+                    ?: (data["current_bio"] as? String)
                     ?: (data["about"] as? String)
                     ?: (data["status"] as? String)
                     ?: ""
@@ -509,13 +506,17 @@ class PlenxoViewModel(application: Application) : AndroidViewModel(application) 
                 }
 
                 try {
-                    val ageVal = (data["age"]?.toString()) ?: (data["dateOfBirth"] as? String) ?: ""
+                    val ageVal = (data["age"]?.toString()) ?: ""
+                    val dobVal = (data["dob"] as? String) ?: (data["dateOfBirth"] as? String) ?: ""
+                    val genderVal = (data["gender"] as? String) ?: ""
                     SessionManager.saveUserProfileLocally(
                         getApplication(),
                         plenxoId = newProf.plenxoId,
                         displayName = newProf.displayName,
                         bio = newProf.bio,
                         profilePicUrl = newProf.profilePicUrl,
+                        dob = dobVal,
+                        gender = genderVal,
                         age = ageVal
                     )
                 } catch (_: Throwable) {}
@@ -1292,24 +1293,23 @@ class PlenxoViewModel(application: Application) : AndroidViewModel(application) 
                 viewModelScope.launch(Dispatchers.IO) {
                     try {
                         val uid = fbUser.uid
-                        val userDoc = kotlinx.coroutines.withTimeoutOrNull(8000) {
-                            try {
-                                firestore.collection("users").document(uid).get().await()
-                            } catch (e: Exception) {
-                                null
-                            }
-                        } ?: try {
-                            firestore.collection("users").document(uid).get(com.google.firebase.firestore.Source.CACHE).await()
+                        val readResult = try {
+                            com.example.model.fetchUserDocumentSafely(uid, firestore, emailFallback = fbUser.email)
+                        } catch (e: Exception) {
+                            null
+                        }
+                        val userDoc = readResult?.snapshot ?: try {
+                            getDocumentServerFirst(firestore.collection("users").document(uid), timeoutMs = 6000L)
                         } catch (e: Exception) {
                             null
                         }
                         
                         val docToUse = userDoc
-                        val fetchedName = docToUse?.getString("displayName") 
-                            ?: docToUse?.getString("display_name")
-                            ?: docToUse?.getString("name") 
-                            ?: docToUse?.getString("current_name")
-                            ?: docToUse?.getString("fullName")
+                        val fetchedName = docToUse?.getString("displayName")?.takeIf { it.isNotBlank() && it != "User" }
+                            ?: docToUse?.getString("name")?.takeIf { it.isNotBlank() && it != "User" }
+                            ?: docToUse?.getString("display_name")?.takeIf { it.isNotBlank() && it != "User" }
+                            ?: docToUse?.getString("current_name")?.takeIf { it.isNotBlank() && it != "User" }
+                            ?: docToUse?.getString("fullName")?.takeIf { it.isNotBlank() && it != "User" }
                             ?: ""
                         val fetchedCode = docToUse?.getString("plenxoId") 
                             ?: docToUse?.getString("plenxo_id") 
@@ -1321,47 +1321,54 @@ class PlenxoViewModel(application: Application) : AndroidViewModel(application) 
                                                docToUse?.getBoolean("isProfileSetup") == true || 
                                                docToUse?.getBoolean("profileSetupCompleted") == true ||
                                                docToUse?.getBoolean("is_profile_completed") == true ||
-                                               docToUse?.getBoolean("isProfileCompleted") == true
-                        val isEmailVerified = fbUser.isEmailVerified || 
-                                              docToUse?.getBoolean("isEmailVerified") == true || 
-                                              docToUse?.getBoolean("emailVerified") == true || 
-                                              docToUse?.getBoolean("is_email_verified") == true || 
-                                              isSetupCompleted ||
-                                              fetchedName.isNotBlank() ||
-                                              fetchedCode.isNotBlank()
+                                               docToUse?.getBoolean("isProfileCompleted") == true ||
+                                               fetchedName.isNotBlank()
 
                         withContext(Dispatchers.Main) {
+                            val localProfile = SessionManager.getUserProfileLocally(getApplication())
                             if (docToUse != null && docToUse.exists()) {
-                                val fetchedBio = docToUse.getString("bio") 
-                                    ?: docToUse.getString("statusMessage") 
-                                    ?: docToUse.getString("current_bio")
-                                    ?: docToUse.getString("status_message")
-                                    ?: docToUse.getString("about")
-                                    ?: docToUse.getString("status")
+                                val fetchedBio = docToUse.getString("bio")?.takeIf { it.isNotBlank() }
+                                    ?: docToUse.getString("statusMessage")?.takeIf { it.isNotBlank() }
+                                    ?: docToUse.getString("bioStatus")?.takeIf { it.isNotBlank() }
+                                    ?: docToUse.getString("bio_status")?.takeIf { it.isNotBlank() }
+                                    ?: docToUse.getString("current_bio")?.takeIf { it.isNotBlank() }
+                                    ?: docToUse.getString("status_message")?.takeIf { it.isNotBlank() }
+                                    ?: docToUse.getString("about")?.takeIf { it.isNotBlank() }
+                                    ?: docToUse.getString("status")?.takeIf { it.isNotBlank() }
                                     ?: ""
-                                val fetchedPic = docToUse.getString("profilePicUrl") 
-                                    ?: docToUse.getString("profilePic")
-                                    ?: docToUse.getString("avatarUrl") 
-                                    ?: docToUse.getString("avatar_url") 
-                                    ?: docToUse.getString("photoUrl") 
-                                    ?: docToUse.getString("photo_url")
-                                    ?: docToUse.getString("profileUrl")
-                                    ?: docToUse.getString("current_profile_pic_url")
+                                val fetchedPic = docToUse.getString("avatarUrl")?.takeIf { it.isNotBlank() }
+                                    ?: docToUse.getString("avatar_url")?.takeIf { it.isNotBlank() }
+                                    ?: docToUse.getString("profilePicUrl")?.takeIf { it.isNotBlank() }
+                                    ?: docToUse.getString("profilePic")?.takeIf { it.isNotBlank() }
+                                    ?: docToUse.getString("photoUrl")?.takeIf { it.isNotBlank() }
+                                    ?: docToUse.getString("profileUrl")?.takeIf { it.isNotBlank() }
                                     ?: ""
                                 val fetchedAge = docToUse.get("age")?.toString() ?: docToUse.getString("dateOfBirth") ?: ""
 
-                                if (fetchedName.isNotBlank()) displayName.value = fetchedName
-                                if (fetchedBio.isNotBlank()) aboutText.value = fetchedBio
-                                if (fetchedPic.isNotBlank()) {
-                                    galleryImageUriString.value = fetchedPic
-                                    uploadedProfilePicUrl.value = fetchedPic
-                                    if (fetchedPic.startsWith("http")) {
+                                val safeName = fetchedName.ifBlank {
+                                    localProfile.displayName.takeIf { it.isNotBlank() && it != "User" }
+                                        ?: if (fbUser.email != null && fbUser.email!!.contains("@")) fbUser.email!!.substringBefore("@") else "User"
+                                }
+                                val safeBio = fetchedBio.ifBlank { localProfile.bio }
+                                val safePic = fetchedPic.ifBlank { localProfile.profilePicUrl }
+
+                                displayName.value = safeName
+                                if (safeBio.isNotBlank()) aboutText.value = safeBio
+                                if (safePic.isNotBlank()) {
+                                    galleryImageUriString.value = safePic
+                                    uploadedProfilePicUrl.value = safePic
+                                    if (safePic.startsWith("http")) {
                                         avatarType.value = "gallery"
                                     }
                                 }
 
                                 if (fetchedCode.isNotBlank()) {
                                     val formatted = if (fetchedCode.startsWith("PX-")) fetchedCode else "PX-$fetchedCode"
+                                    plenxoId.value = formatted
+                                    revealedPlenxoId.value = formatted
+                                    userCode.value = formatted.removePrefix("PX-")
+                                } else if (localProfile.plenxoId.isNotBlank()) {
+                                    val formatted = if (localProfile.plenxoId.startsWith("PX-")) localProfile.plenxoId else "PX-${localProfile.plenxoId}"
                                     plenxoId.value = formatted
                                     revealedPlenxoId.value = formatted
                                     userCode.value = formatted.removePrefix("PX-")
@@ -1379,10 +1386,10 @@ class PlenxoViewModel(application: Application) : AndroidViewModel(application) 
                                     uid = uid,
                                     id = uid,
                                     email = fbUser.email ?: "",
-                                    displayName = fetchedName,
-                                    bio = fetchedBio,
-                                    statusMessage = fetchedBio,
-                                    profilePicUrl = fetchedPic,
+                                    displayName = safeName,
+                                    bio = safeBio,
+                                    statusMessage = safeBio,
+                                    profilePicUrl = safePic,
                                     plenxoId = plenxoId.value,
                                     userCode = userCode.value,
                                     profileRingId = docToUse.getString("profileRingId") ?: docToUse.getString("selectedRingId") ?: "none"
@@ -1391,99 +1398,59 @@ class PlenxoViewModel(application: Application) : AndroidViewModel(application) 
                                 SessionManager.saveUserProfileLocally(
                                     getApplication(),
                                     plenxoId = plenxoId.value,
-                                    displayName = fetchedName,
-                                    bio = fetchedBio,
-                                    profilePicUrl = fetchedPic,
+                                    displayName = safeName,
+                                    bio = safeBio,
+                                    profilePicUrl = safePic,
                                     age = fetchedAge
                                 )
 
                                 observeCurrentUserProfile()
                                 startListeningForChats()
 
-                                val savedStage = SessionManager.getSavedOnboardingStage(getApplication())
-                                when {
-                                    savedStage == SessionManager.STAGE_COMPLETED && isSetupCompleted -> {
-                                        navigateToScreen(PlenxoScreen.HOME, addToHistory = false, clearHistory = true)
-                                    }
-                                    savedStage == SessionManager.STAGE_REVEAL_PENDING -> {
-                                        navigateToScreen(PlenxoScreen.PLENXO_ID_REVEAL, addToHistory = false, clearHistory = true)
-                                    }
-                                    savedStage == SessionManager.STAGE_PROFILE_SETUP_PENDING -> {
-                                        navigateToScreen(PlenxoScreen.PROFILE_SETUP, addToHistory = false, clearHistory = true)
-                                    }
-                                    savedStage == SessionManager.STAGE_WELCOME_PENDING -> {
-                                        navigateToScreen(PlenxoScreen.WELCOME, addToHistory = false, clearHistory = true)
-                                    }
-                                    savedStage == SessionManager.STAGE_OTP_PENDING -> {
-                                        navigateToScreen(PlenxoScreen.OTP_VERIFICATION, addToHistory = false, clearHistory = true)
-                                    }
-                                    isSetupCompleted -> {
-                                        SessionManager.saveOnboardingStage(getApplication(), SessionManager.STAGE_COMPLETED)
-                                        navigateToScreen(PlenxoScreen.HOME, addToHistory = false, clearHistory = true)
-                                    }
-                                    else -> {
-                                        SessionManager.saveOnboardingStage(getApplication(), SessionManager.STAGE_PROFILE_SETUP_PENDING)
-                                        navigateToScreen(PlenxoScreen.PROFILE_SETUP, addToHistory = false, clearHistory = true)
-                                    }
+                                if (isSetupCompleted) {
+                                    SessionManager.saveOnboardingStage(getApplication(), SessionManager.STAGE_COMPLETED)
+                                    SessionManager.saveOnboardingCompleted(getApplication(), true)
+                                    navigateToScreen(PlenxoScreen.HOME, addToHistory = false, clearHistory = true)
+                                } else {
+                                    SessionManager.saveOnboardingStage(getApplication(), SessionManager.STAGE_PROFILE_SETUP_PENDING)
+                                    SessionManager.saveOnboardingCompleted(getApplication(), false)
+                                    navigateToScreen(PlenxoScreen.PROFILE_SETUP, addToHistory = false, clearHistory = true)
                                 }
                             } else {
-                                val localProfile = SessionManager.getUserProfileLocally(getApplication())
-                                val savedStage = SessionManager.getSavedOnboardingStage(getApplication())
-                                when {
-                                    savedStage == SessionManager.STAGE_COMPLETED && localProfile.displayName.isNotBlank() -> {
-                                        if (displayName.value.isBlank()) displayName.value = localProfile.displayName
-                                        if (plenxoId.value.isBlank()) plenxoId.value = localProfile.plenxoId
-                                        currentUserProfile.value = UserProfile(
-                                            uid = uid,
-                                            id = uid,
-                                            email = fbUser.email ?: "",
-                                            displayName = localProfile.displayName,
-                                            bio = localProfile.bio,
-                                            profilePicUrl = localProfile.profilePicUrl,
-                                            plenxoId = localProfile.plenxoId
-                                        )
-                                        observeCurrentUserProfile()
-                                        startListeningForChats()
-                                        navigateToScreen(PlenxoScreen.HOME, addToHistory = false, clearHistory = true)
-                                    }
-                                    savedStage == SessionManager.STAGE_REVEAL_PENDING -> {
-                                        navigateToScreen(PlenxoScreen.PLENXO_ID_REVEAL, addToHistory = false, clearHistory = true)
-                                    }
-                                    savedStage == SessionManager.STAGE_PROFILE_SETUP_PENDING -> {
-                                        navigateToScreen(PlenxoScreen.PROFILE_SETUP, addToHistory = false, clearHistory = true)
-                                    }
-                                    savedStage == SessionManager.STAGE_WELCOME_PENDING -> {
-                                        navigateToScreen(PlenxoScreen.WELCOME, addToHistory = false, clearHistory = true)
-                                    }
-                                    savedStage == SessionManager.STAGE_OTP_PENDING -> {
-                                        navigateToScreen(PlenxoScreen.OTP_VERIFICATION, addToHistory = false, clearHistory = true)
-                                    }
-                                    else -> {
-                                        SessionManager.saveOnboardingStage(getApplication(), SessionManager.STAGE_WELCOME_PENDING)
-                                        navigateToScreen(PlenxoScreen.WELCOME, addToHistory = false, clearHistory = true)
-                                    }
+                                if (localProfile.displayName.isNotBlank() && localProfile.displayName != "User") {
+                                    if (displayName.value.isBlank()) displayName.value = localProfile.displayName
+                                    if (plenxoId.value.isBlank()) plenxoId.value = localProfile.plenxoId
+                                    currentUserProfile.value = UserProfile(
+                                        uid = uid,
+                                        id = uid,
+                                        email = fbUser.email ?: "",
+                                        displayName = localProfile.displayName,
+                                        bio = localProfile.bio,
+                                        profilePicUrl = localProfile.profilePicUrl,
+                                        plenxoId = localProfile.plenxoId
+                                    )
+                                    observeCurrentUserProfile()
+                                    startListeningForChats()
+                                    SessionManager.saveOnboardingStage(getApplication(), SessionManager.STAGE_COMPLETED)
+                                    SessionManager.saveOnboardingCompleted(getApplication(), true)
+                                    navigateToScreen(PlenxoScreen.HOME, addToHistory = false, clearHistory = true)
+                                } else {
+                                    SessionManager.saveOnboardingStage(getApplication(), SessionManager.STAGE_PROFILE_SETUP_PENDING)
+                                    SessionManager.saveOnboardingCompleted(getApplication(), false)
+                                    navigateToScreen(PlenxoScreen.PROFILE_SETUP, addToHistory = false, clearHistory = true)
                                 }
                             }
                         }
                     } catch (e: Exception) {
                         Log.e("Plenxo", "Error verifying profile during session restore: ${e.message}", e)
                         withContext(Dispatchers.Main) {
-                            val savedStage = SessionManager.getSavedOnboardingStage(getApplication())
                             val localProfile = SessionManager.getUserProfileLocally(getApplication())
-                            if (savedStage == SessionManager.STAGE_COMPLETED && localProfile.displayName.isNotBlank()) {
+                            if (localProfile.displayName.isNotBlank() && localProfile.displayName != "User") {
                                 if (displayName.value.isBlank()) displayName.value = localProfile.displayName
                                 if (plenxoId.value.isBlank()) plenxoId.value = localProfile.plenxoId
                                 navigateToScreen(PlenxoScreen.HOME, addToHistory = false, clearHistory = true)
-                            } else if (savedStage == SessionManager.STAGE_REVEAL_PENDING) {
-                                navigateToScreen(PlenxoScreen.PLENXO_ID_REVEAL, addToHistory = false, clearHistory = true)
-                            } else if (savedStage == SessionManager.STAGE_PROFILE_SETUP_PENDING) {
-                                navigateToScreen(PlenxoScreen.PROFILE_SETUP, addToHistory = false, clearHistory = true)
-                            } else if (savedStage == SessionManager.STAGE_WELCOME_PENDING) {
-                                navigateToScreen(PlenxoScreen.WELCOME, addToHistory = false, clearHistory = true)
-                            } else if (savedStage == SessionManager.STAGE_OTP_PENDING) {
-                                navigateToScreen(PlenxoScreen.OTP_VERIFICATION, addToHistory = false, clearHistory = true)
                             } else {
-                                navigateToScreen(PlenxoScreen.LOGIN, addToHistory = false, clearHistory = true)
+                                navigateToScreen(PlenxoScreen.PROFILE_SETUP, addToHistory = false, clearHistory = true)
                             }
                         }
                     }
@@ -2378,21 +2345,25 @@ class PlenxoViewModel(application: Application) : AndroidViewModel(application) 
                             }
 
                             if (foundEmailStr.isNullOrBlank()) {
-                                // Check plenxo_id & user_code in users collection
-                                var snapshot2 = firestore.collection("users")
-                                    .whereEqualTo("plenxo_id", formattedPxId.uppercase())
-                                    .limit(1).get().await()
-                                if (snapshot2.isEmpty) {
-                                    snapshot2 = firestore.collection("users")
-                                        .whereEqualTo("plenxo_id", formattedPxId)
-                                        .limit(1).get().await()
+                                val queryA = firestore.collection("users")
+                                    .whereEqualTo("plenxoId", formattedPxId.lowercase())
+                                    .limit(1)
+                                var snapshot2 = try {
+                                    getQuerySnapshotServerFirst(queryA, timeoutMs = 4000L)
+                                } catch (_: Exception) {
+                                    null
                                 }
-                                if (snapshot2.isEmpty) {
-                                    snapshot2 = firestore.collection("users")
-                                        .whereEqualTo("user_code", targetId)
-                                        .limit(1).get().await()
+                                if (snapshot2 == null || snapshot2.isEmpty) {
+                                    val queryB = firestore.collection("users")
+                                        .whereEqualTo("plenxoId", formattedPxId)
+                                        .limit(1)
+                                    snapshot2 = try {
+                                        getQuerySnapshotServerFirst(queryB, timeoutMs = 4000L)
+                                    } catch (_: Exception) {
+                                        null
+                                    }
                                 }
-                                if (!snapshot2.isEmpty) {
+                                if (snapshot2 != null && !snapshot2.isEmpty) {
                                     foundEmailStr = snapshot2.documents[0].getString("email")
                                 }
                             }
@@ -3705,6 +3676,9 @@ class PlenxoViewModel(application: Application) : AndroidViewModel(application) 
                     "id" to currentUid,
                     "email" to email.value.trim(),
                     "displayName" to name,
+                    "name" to name,
+                    "bio" to aboutText.value.trim(),
+                    "statusMessage" to aboutText.value.trim(),
                     "profilePicUrl" to avatarValue,
                     "themePreference" to selectedTheme.value,
                     "userCode" to userCode.value,

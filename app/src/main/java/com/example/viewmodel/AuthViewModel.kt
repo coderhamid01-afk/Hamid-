@@ -11,6 +11,7 @@ import com.example.network.OtpApiService
 import com.example.network.SendOtpRequest
 import com.example.util.SessionManager
 import com.example.util.EmailUtils
+import com.example.util.getDocumentServerFirst
 import com.google.firebase.FirebaseNetworkException
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
@@ -110,6 +111,10 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         signUpCaptchaInput.value = ""
     }
 
+    fun markSignUpCaptchaVerified() {
+        signUpCaptchaInput.value = expectedSignUpCaptcha
+    }
+
     fun generateLoginCaptcha() {
         val num1 = Random.nextInt(10, 99)
         val num2 = Random.nextInt(1, 10)
@@ -122,6 +127,10 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             expectedLoginCaptcha = (num1 - num2).toString()
         }
         loginCaptchaInput.value = ""
+    }
+
+    fun markLoginCaptchaVerified() {
+        loginCaptchaInput.value = expectedLoginCaptcha
     }
 
     // Real-time DoB Age Calculation
@@ -516,21 +525,24 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
             try {
                 val now = System.currentTimeMillis()
-                val finalPic = profilePicUrl.value.ifBlank { "https://placehold.co/150/07C160/ffffff?text=" + name.value.take(1) }
+                val savedLocal = SessionManager.getUserProfileLocally(getApplication())
+                val resolvedDisplayName = name.value.trim().ifBlank { savedLocal.displayName }.ifBlank { "User" }
+                val resolvedBio = bio.value.trim().ifBlank { savedLocal.bio }
+                val finalPic = profilePicUrl.value.ifBlank { savedLocal.profilePicUrl }.ifBlank { "https://placehold.co/150/07C160/ffffff?text=" + resolvedDisplayName.take(1) }
 
                 val userMap = mapOf(
                     "uid" to uid,
                     "id" to uid,
                     "email" to emailAddr,
-                    "name" to name.value.trim(),
-                    "displayName" to name.value.trim(),
-                    "display_name" to name.value.trim(),
-                    "bio" to bio.value.trim(),
-                    "statusMessage" to bio.value.trim(),
-                    "dob" to dob.value.trim(),
-                    "dateOfBirth" to dob.value.trim(),
-                    "age" to calculatedAge.value.trim(),
-                    "gender" to gender.value,
+                    "name" to resolvedDisplayName,
+                    "displayName" to resolvedDisplayName,
+                    "display_name" to resolvedDisplayName,
+                    "bio" to resolvedBio,
+                    "statusMessage" to resolvedBio,
+                    "dob" to dob.value.trim().ifBlank { savedLocal.dob },
+                    "dateOfBirth" to dob.value.trim().ifBlank { savedLocal.dob },
+                    "age" to calculatedAge.value.trim().ifBlank { savedLocal.age },
+                    "gender" to gender.value.ifBlank { savedLocal.gender },
                     "profilePicUrl" to finalPic,
                     "avatar_url" to finalPic,
                     "plenxoId" to pxId,
@@ -564,10 +576,10 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                 SessionManager.saveUserProfileLocally(
                     getApplication(),
                     plenxoId = pxId,
-                    displayName = name.value.trim(),
-                    bio = bio.value.trim(),
+                    displayName = resolvedDisplayName,
+                    bio = resolvedBio,
                     profilePicUrl = finalPic,
-                    age = calculatedAge.value.trim()
+                    age = calculatedAge.value.trim().ifBlank { savedLocal.age }
                 )
                 SessionManager.saveLoginState(getApplication(), uid, emailAddr)
 
@@ -575,9 +587,9 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                     uid = uid,
                     id = uid,
                     email = emailAddr,
-                    displayName = name.value.trim(),
-                    bio = bio.value.trim(),
-                    statusMessage = bio.value.trim(),
+                    displayName = resolvedDisplayName,
+                    bio = resolvedBio,
+                    statusMessage = resolvedBio,
                     profilePicUrl = finalPic,
                     plenxoId = pxId,
                     userCode = numericCode
@@ -655,28 +667,24 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                 val uid = result.user?.uid ?: throw Exception("Auth returned null user ID")
                 val userEmail = result.user?.email ?: mail
 
-                // 2. Fetch user document from Firestore (8s timeout, then try local cache)
-                var docSnapshot: DocumentSnapshot? = kotlinx.coroutines.withTimeoutOrNull(8000L) {
-                    try {
-                        firestore.collection("users").document(uid).get().await()
-                    } catch (e: Exception) {
-                        null
-                    }
+                // 2. Fetch user document from Firestore (Server-first with cache fallback & email query fallback)
+                val readResult = try {
+                    com.example.model.fetchUserDocumentSafely(uid, firestore, emailFallback = userEmail)
+                } catch (e: Exception) {
+                    Log.w("AuthViewModel", "Resilient document fetch error for $uid: ${e.message}")
+                    null
                 }
 
-                if (docSnapshot == null) {
-                    docSnapshot = try {
-                        firestore.collection("users").document(uid).get(com.google.firebase.firestore.Source.CACHE).await()
-                    } catch (e: Exception) {
-                        null
-                    }
+                val doc = readResult?.snapshot
+
+                val parsedUserModel = try {
+                    doc?.toObject(com.example.model.UserModel::class.java)
+                } catch (_: Exception) {
+                    null
                 }
 
-                val doc = docSnapshot
-
-                val rawPxId = doc?.getString("plenxoId") 
-                    ?: doc?.getString("plenxo_id") 
-                    ?: doc?.getString("px_id") 
+                val rawPxId = parsedUserModel?.plenxoId?.takeIf { it.isNotBlank() }
+                    ?: doc?.getString("plenxoId") 
                     ?: doc?.getString("userCode")
                     ?: ""
                 val cleanPxId = rawPxId.trim().removePrefix("@").removePrefix("#")
@@ -686,15 +694,40 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                     else -> ""
                 }
 
-                val storedName = doc?.getString("displayName") 
-                    ?: doc?.getString("display_name")
-                    ?: doc?.getString("name") 
+                // Prioritize Firestore user document FIRST
+                val storedName = parsedUserModel?.displayName?.takeIf { it.isNotBlank() && it != "User" }
+                    ?: doc?.getString("displayName")?.takeIf { it.isNotBlank() && it != "User" }
+                    ?: doc?.getString("display_name")?.takeIf { it.isNotBlank() && it != "User" }
+                    ?: doc?.getString("name")?.takeIf { it.isNotBlank() && it != "User" }
+                    ?: doc?.getString("current_name")?.takeIf { it.isNotBlank() && it != "User" }
+                    ?: doc?.getString("fullName")?.takeIf { it.isNotBlank() && it != "User" }
+                    ?: doc?.getString("full_name")?.takeIf { it.isNotBlank() && it != "User" }
+                    ?: doc?.getString("username")?.takeIf { it.isNotBlank() && it != "User" }
                     ?: ""
-                val storedBio = doc?.getString("bio") 
-                    ?: doc?.getString("statusMessage") 
+                val storedBio = parsedUserModel?.bio?.takeIf { it.isNotBlank() }
+                    ?: doc?.getString("bio")?.takeIf { it.isNotBlank() }
+                    ?: doc?.getString("statusMessage")?.takeIf { it.isNotBlank() }
+                    ?: doc?.getString("bioStatus")?.takeIf { it.isNotBlank() }
+                    ?: doc?.getString("bio_status")?.takeIf { it.isNotBlank() }
+                    ?: doc?.getString("status_message")?.takeIf { it.isNotBlank() }
+                    ?: doc?.getString("current_bio")?.takeIf { it.isNotBlank() }
+                    ?: doc?.getString("about")?.takeIf { it.isNotBlank() }
+                    ?: doc?.getString("status")?.takeIf { it.isNotBlank() }
                     ?: ""
-                val storedPic = doc?.getString("profilePicUrl") 
-                    ?: doc?.getString("avatar_url") 
+                val storedPic = parsedUserModel?.profilePicUrl?.takeIf { it.isNotBlank() }
+                    ?: doc?.getString("avatarUrl")?.takeIf { it.isNotBlank() }
+                    ?: doc?.getString("avatar_url")?.takeIf { it.isNotBlank() }
+                    ?: doc?.getString("profilePicUrl")?.takeIf { it.isNotBlank() }
+                    ?: doc?.getString("profilePic")?.takeIf { it.isNotBlank() }
+                    ?: doc?.getString("photoUrl")?.takeIf { it.isNotBlank() }
+                    ?: doc?.getString("profileUrl")?.takeIf { it.isNotBlank() }
+                    ?: ""
+                val storedDob = doc?.getString("dob") 
+                    ?: doc?.getString("dateOfBirth") 
+                    ?: doc?.getString("date_of_birth") 
+                    ?: doc?.get("dobMillis")?.toString() 
+                    ?: ""
+                val storedGender = doc?.getString("gender") 
                     ?: ""
                 val storedAge = doc?.get("age")?.toString() ?: ""
 
@@ -702,6 +735,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                     || doc?.getBoolean("is_profile_completed") == true 
                     || doc?.getBoolean("isProfileSetupCompleted") == true 
                     || doc?.getBoolean("profileSetupCompleted") == true
+                    || (storedName.isNotBlank() && storedName != "User")
 
                 val localProfile = SessionManager.getUserProfileLocally(getApplication())
 
@@ -712,9 +746,15 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                     val localPx = localProfile.plenxoId.trim().removePrefix("@").removePrefix("#")
                     if (localPx.startsWith("PX-", ignoreCase = true)) localPx else if (localPx.isNotBlank()) "PX-$localPx" else fallbackPxId
                 }
-                val finalName = storedName.ifBlank { localProfile.displayName.ifBlank { "User" } }
+                // STRICT RULE: Only fallback to email prefix IF AND ONLY IF Firestore document does not exist or displayName is completely blank
+                val finalName = storedName.ifBlank {
+                    localProfile.displayName.takeIf { it.isNotBlank() && it != "User" }
+                        ?: if (userEmail.contains("@")) userEmail.substringBefore("@") else "User"
+                }
                 val finalBio = storedBio.ifBlank { localProfile.bio }
                 val finalPic = storedPic.ifBlank { localProfile.profilePicUrl }
+                val finalDob = storedDob.ifBlank { localProfile.dob }
+                val finalGender = storedGender.ifBlank { localProfile.gender }
 
                 SessionManager.saveUserProfileLocally(
                     getApplication(),
@@ -722,16 +762,25 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                     displayName = finalName,
                     bio = finalBio,
                     profilePicUrl = finalPic,
+                    dob = finalDob,
+                    gender = finalGender,
                     age = storedAge
                 )
                 SessionManager.saveLoginState(getApplication(), uid, userEmail)
-                SessionManager.saveOnboardingStage(getApplication(), SessionManager.STAGE_COMPLETED)
-                SessionManager.saveOnboardingCompleted(getApplication(), true)
+                if (isProfileCompletedInDoc) {
+                    SessionManager.saveOnboardingStage(getApplication(), SessionManager.STAGE_COMPLETED)
+                    SessionManager.saveOnboardingCompleted(getApplication(), true)
+                } else {
+                    SessionManager.saveOnboardingStage(getApplication(), SessionManager.STAGE_PROFILE_SETUP_PENDING)
+                    SessionManager.saveOnboardingCompleted(getApplication(), false)
+                }
 
                 this@AuthViewModel.plenxoId.value = finalPlenxoId
                 this@AuthViewModel.name.value = finalName
                 this@AuthViewModel.bio.value = finalBio
                 this@AuthViewModel.profilePicUrl.value = finalPic
+                if (finalDob.isNotBlank()) this@AuthViewModel.dob.value = finalDob
+                if (finalGender.isNotBlank()) this@AuthViewModel.gender.value = finalGender
 
                 val domainModel = UserProfile(
                     uid = uid,
@@ -746,7 +795,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                 )
 
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(getApplication(), "Welcome back!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(getApplication(), "Authentication successful.", Toast.LENGTH_SHORT).show()
                     loginSuccess.value = true
                     isLoginLoading.value = false
                     onSuccess(domainModel)

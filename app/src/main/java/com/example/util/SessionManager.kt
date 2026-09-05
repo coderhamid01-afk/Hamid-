@@ -36,6 +36,8 @@ object SessionManager {
     private const val KEY_DISPLAY_NAME = "key_display_name"
     private const val KEY_BIO = "key_bio"
     private const val KEY_PROFILE_PIC_URL = "key_profile_pic_url"
+    private const val KEY_DOB = "key_dob"
+    private const val KEY_GENDER = "key_gender"
     private const val KEY_USER_AGE = "key_user_age"
     private const val KEY_ONBOARDING_STAGE = "key_onboarding_stage"
 
@@ -59,8 +61,12 @@ object SessionManager {
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             )
         } catch (e: Exception) {
-            Log.e("SessionManager", "Secure initialization failed: EncryptedSharedPreferences could not be initialized securely.")
-            throw SecurityException("Secure storage failed to initialize. Re-authentication required.")
+            Log.w("SessionManager", "EncryptedSharedPreferences unavailable; falling back to safe local storage: ${e.message}")
+            try {
+                context.getSharedPreferences(PREF_NAME + "_secure_fallback", Context.MODE_PRIVATE)
+            } catch (fallbackEx: Exception) {
+                null
+            }
         }
     }
 
@@ -167,7 +173,7 @@ object SessionManager {
         getEncryptedPrefs(context)?.edit()?.putString(KEY_ABOUT_TEXT, text)?.apply()
     }
     fun getAboutText(context: Context): String {
-        return getEncryptedPrefs(context)?.getString(KEY_ABOUT_TEXT, "Hey there! I am using Plenxo Pro.") ?: "Hey there! I am using Plenxo Pro."
+        return getEncryptedPrefs(context)?.getString(KEY_ABOUT_TEXT, "Hey there! I am using Plenxo.") ?: "Hey there! I am using Plenxo."
     }
 
     fun savePinnedChats(context: Context, chatIds: Set<String>) {
@@ -244,6 +250,8 @@ object SessionManager {
         displayName: String,
         bio: String,
         profilePicUrl: String,
+        dob: String = "",
+        gender: String = "",
         age: String = ""
     ) {
         try {
@@ -252,6 +260,8 @@ object SessionManager {
                 if (displayName.isNotBlank()) putString(KEY_DISPLAY_NAME, displayName)
                 if (bio.isNotBlank()) putString(KEY_BIO, bio)
                 if (profilePicUrl.isNotBlank()) putString(KEY_PROFILE_PIC_URL, profilePicUrl)
+                if (dob.isNotBlank()) putString(KEY_DOB, dob)
+                if (gender.isNotBlank()) putString(KEY_GENDER, gender)
                 if (age.isNotBlank()) putString(KEY_USER_AGE, age)
                 apply()
             }
@@ -272,6 +282,12 @@ object SessionManager {
 
     fun getLocalProfilePicUrl(context: Context): String =
         getEncryptedPrefs(context)?.getString(KEY_PROFILE_PIC_URL, "") ?: ""
+
+    fun getLocalDob(context: Context): String =
+        getEncryptedPrefs(context)?.getString(KEY_DOB, "") ?: ""
+
+    fun getLocalGender(context: Context): String =
+        getEncryptedPrefs(context)?.getString(KEY_GENDER, "") ?: ""
 
     fun getLocalAge(context: Context): String =
         getEncryptedPrefs(context)?.getString(KEY_USER_AGE, "") ?: ""
@@ -389,6 +405,8 @@ object SessionManager {
                 displayName = getLocalDisplayName(context),
                 bio = getLocalBio(context),
                 profilePicUrl = getLocalProfilePicUrl(context),
+                dob = getLocalDob(context),
+                gender = getLocalGender(context),
                 age = getLocalAge(context)
             )
         } catch (_: Exception) {
@@ -402,6 +420,8 @@ data class LocalUserProfile(
     val displayName: String = "",
     val bio: String = "",
     val profilePicUrl: String = "",
+    val dob: String = "",
+    val gender: String = "",
     val age: String = ""
 )
 

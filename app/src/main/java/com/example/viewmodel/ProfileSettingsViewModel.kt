@@ -19,6 +19,7 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -51,6 +52,11 @@ class ProfileSettingsViewModel(application: Application) : AndroidViewModel(appl
     private val saveUserProfileUseCase = SaveUserProfileUseCase(repository)
     private val accountDeletionRepo = AccountDeletionRepositoryImpl()
 
+    private val _refreshTrigger = MutableStateFlow(0)
+    fun refreshProfile() {
+        _refreshTrigger.value += 1
+    }
+
     private val _updateState = MutableStateFlow<UpdateUiState>(UpdateUiState.Idle)
     val updateState: StateFlow<UpdateUiState> = _updateState.asStateFlow()
 
@@ -80,69 +86,94 @@ class ProfileSettingsViewModel(application: Application) : AndroidViewModel(appl
             return ""
         }
 
-    val profileUiState: StateFlow<ProfileUiState> = flow {
-        val resolvedUid = currentUid
-        if (resolvedUid.isEmpty()) {
-            emit(ProfileUiState.Error("User not authenticated"))
-        } else {
-            val userEmail = auth.currentUser?.email 
-                ?: com.example.util.SessionManager.getLoginState(getApplication()).email 
-                ?: ""
-            fetchUserProfileUseCase(resolvedUid)
-                .map { profile ->
-                    val local = com.example.util.SessionManager.getUserProfileLocally(getApplication())
-                    val fallbackPxId = if (resolvedUid.isNotBlank()) "PX-" + (kotlin.math.abs(resolvedUid.hashCode()) % 900000 + 100000) else ""
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val profileUiState: StateFlow<ProfileUiState> = _refreshTrigger.flatMapLatest {
+        flow {
+            val resolvedUid = currentUid
+            if (resolvedUid.isEmpty()) {
+                emit(ProfileUiState.Error("User not authenticated"))
+            } else {
+                val userEmail = auth.currentUser?.email 
+                    ?: com.example.util.SessionManager.getLoginState(getApplication()).email 
+                    ?: ""
+                fetchUserProfileUseCase(resolvedUid)
+                    .map { profile ->
+                        val local = com.example.util.SessionManager.getUserProfileLocally(getApplication())
+                        val fallbackPxId = if (resolvedUid.isNotBlank()) "PX-" + (kotlin.math.abs(resolvedUid.hashCode()) % 900000 + 100000) else ""
 
-                    if (profile != null) {
-                        val resolvedName = profile.name.ifBlank {
-                            local.displayName.ifBlank {
-                                auth.currentUser?.displayName ?: if (userEmail.contains("@")) userEmail.substringBefore("@") else "User"
+                        if (profile != null) {
+                            val resolvedName = profile.resolvedDisplayName.takeIf { it.isNotBlank() && it != "User" }
+                                ?: profile.name.takeIf { it.isNotBlank() && it != "User" }
+                                ?: profile.displayName.takeIf { it.isNotBlank() && it != "User" }
+                                ?: local.displayName.takeIf { it.isNotBlank() && it != "User" }
+                                ?: auth.currentUser?.displayName?.takeIf { it.isNotBlank() && it != "User" }
+                                ?: profile.displayName.ifBlank { profile.name }.ifBlank { local.displayName }.ifBlank {
+                                    auth.currentUser?.displayName ?: if (userEmail.contains("@")) userEmail.substringBefore("@") else "User"
+                                }
+                            val resolvedBio = profile.resolvedBio.ifBlank {
+                                profile.bio.ifBlank {
+                                    profile.statusMessage.ifBlank {
+                                        local.bio
+                                    }
+                                }
                             }
-                        }
-                        val resolvedBio = profile.bio.ifBlank { local.bio }
-                        val resolvedPic = profile.profilePicUrl.ifBlank {
-                            local.profilePicUrl.ifBlank { auth.currentUser?.photoUrl?.toString() ?: "" }
-                        }
-                        val resolvedPxId = profile.plenxoId.ifBlank {
-                            local.plenxoId.ifBlank { fallbackPxId }
-                        }
-                        ProfileUiState.Success(
-                            profile.copy(
-                                name = resolvedName,
-                                displayName = resolvedName,
-                                bio = resolvedBio,
-                                statusMessage = resolvedBio,
-                                profilePicUrl = resolvedPic,
-                                profileUrl = resolvedPic,
-                                plenxoId = resolvedPxId,
-                                userCode = resolvedPxId
+                            val resolvedPic = profile.profilePicUrl.ifBlank {
+                                profile.profileUrl.ifBlank {
+                                    local.profilePicUrl.ifBlank { auth.currentUser?.photoUrl?.toString() ?: "" }
+                                }
+                            }
+                            val resolvedPxId = profile.plenxoId.ifBlank {
+                                profile.userCode.ifBlank { local.plenxoId.ifBlank { fallbackPxId } }
+                            }
+
+                            if (resolvedName.isNotBlank() && resolvedName != "User") {
+                                com.example.util.SessionManager.saveUserProfileLocally(
+                                    getApplication(),
+                                    plenxoId = resolvedPxId,
+                                    displayName = resolvedName,
+                                    bio = resolvedBio,
+                                    profilePicUrl = resolvedPic
+                                )
+                            }
+
+                            ProfileUiState.Success(
+                                profile.copy(
+                                    name = resolvedName,
+                                    displayName = resolvedName,
+                                    bio = resolvedBio,
+                                    statusMessage = resolvedBio,
+                                    profilePicUrl = resolvedPic,
+                                    profileUrl = resolvedPic,
+                                    plenxoId = resolvedPxId,
+                                    userCode = resolvedPxId
+                                )
                             )
-                        )
-                    } else {
-                        val resolvedName = local.displayName.ifBlank {
-                            auth.currentUser?.displayName ?: if (userEmail.contains("@")) userEmail.substringBefore("@") else "User"
-                        }
-                        val resolvedBio = local.bio.ifBlank { "" }
-                        val resolvedPic = local.profilePicUrl.ifBlank { auth.currentUser?.photoUrl?.toString() ?: "" }
-                        val resolvedPxId = local.plenxoId.ifBlank { fallbackPxId }
-                        ProfileUiState.Success(
-                            UserProfileDomainModel(
-                                userId = resolvedUid,
-                                email = userEmail,
-                                name = resolvedName,
-                                displayName = resolvedName,
-                                bio = resolvedBio,
-                                statusMessage = resolvedBio,
-                                profileUrl = resolvedPic,
-                                profilePicUrl = resolvedPic,
-                                plenxoId = resolvedPxId,
-                                userCode = resolvedPxId
+                        } else {
+                            val resolvedName = local.displayName.takeIf { it.isNotBlank() && it != "User" }
+                                ?: auth.currentUser?.displayName?.takeIf { it.isNotBlank() && it != "User" }
+                                ?: if (userEmail.contains("@")) userEmail.substringBefore("@") else "User"
+                            val resolvedBio = local.bio.ifBlank { "" }
+                            val resolvedPic = local.profilePicUrl.ifBlank { auth.currentUser?.photoUrl?.toString() ?: "" }
+                            val resolvedPxId = local.plenxoId.ifBlank { fallbackPxId }
+                            ProfileUiState.Success(
+                                UserProfileDomainModel(
+                                    userId = resolvedUid,
+                                    email = userEmail,
+                                    name = resolvedName,
+                                    displayName = resolvedName,
+                                    bio = resolvedBio,
+                                    statusMessage = resolvedBio,
+                                    profileUrl = resolvedPic,
+                                    profilePicUrl = resolvedPic,
+                                    plenxoId = resolvedPxId,
+                                    userCode = resolvedPxId
+                                )
                             )
-                        )
+                        }
                     }
-                }
-                .catch { emit(ProfileUiState.Error(it.message ?: "Unknown Error")) }
-                .collect { emit(it) }
+                    .catch { emit(ProfileUiState.Error(it.message ?: "Unknown Error")) }
+                    .collect { emit(it) }
+            }
         }
     }.stateIn(
         scope = viewModelScope,
